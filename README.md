@@ -2,6 +2,12 @@
 
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
 
+## Docker self-hosting
+
+The project also supports a self-hosted Next.js production build with persistent SQLite, independent tenant accounts, and encrypted SMA credentials. See [deploy/README.md](deploy/README.md) for startup, account management, complete backups, and the current server deployment.
+
+Run `node --test tests/selfhost-sqlite.test.mjs` with Node 22 to check migrations and SQLite transaction rollback in addition to `npm test`.
+
 ## Prerequisites
 
 - Node.js `>=22.13.0`

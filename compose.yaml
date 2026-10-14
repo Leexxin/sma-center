@@ -1,0 +1,25 @@
+services:
+  atlas:
+    build: .
+    image: atlas-personal-hub:selfhost
+    restart: unless-stopped
+    init: true
+    ports:
+      - "192.168.33.124:8080:3000"
+    volumes:
+      - atlas-data:/data
+    environment:
+      ATLAS_ADMIN_EMAILS: admin@atlas.local
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  atlas-data:
