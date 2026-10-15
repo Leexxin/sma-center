@@ -26,7 +26,9 @@ npm start
 
 ## Docker 部署
 
-见 [部署与恢复说明](deploy/README.md)。当前安装路径 `/opt/sma-center`，访问地址 `http://192.168.33.124:8080`。
+见 [全流程安装与运维手册](docs/installation-and-operations.md)，文档入口为 [docs/README.md](docs/README.md)。涵盖安装、绑定、升级、备份恢复、排障和安全限制。当前安装路径 `/opt/sma-center`，访问地址 `http://192.168.33.124:8080`。
+
+后续代码变更必须同步维护文档，要求见 [维护约定](docs/maintenance.md) 和根目录 [AGENTS.md](AGENTS.md)。服务器源码目前没有 `.git`，请按手册区分 Git 同步与生产部署。
 
 绑定后从侧栏“安全设置”调整登录有效期，范围 5 分钟到 30 天，默认 12 小时。缩短时长会同时约束旧会话；退出登录会撤销所有已登录设备的会话。
 

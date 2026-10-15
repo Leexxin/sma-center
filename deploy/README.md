@@ -1,5 +1,7 @@
 # Docker 单用户部署
 
+完整、持续维护的操作说明见 [全流程安装与运维手册](../docs/installation-and-operations.md)。本页仅保留常用命令；首次安装、升级和恢复前请先阅读完整手册。
+
 项目目录 `/opt/sma-center`，容器与服务 `sma-center`，外部持久卷 `sma-center-data`，访问地址 `http://192.168.33.124:8080`。
 
 ```sh
@@ -54,7 +56,7 @@ docker compose exec -T sma-center cat /data/setup-code.txt
 
 ## HTTPS
 
-在 HTTPS 反向代理后启用环境变量 `SMA_CENTER_SECURE_COOKIES=true`，并保留浏览器原始 Host。HTTP 内网部署默认不启用 Secure Cookie。
+当前网关按 HTTP 和 Host 计算写请求来源，仅加 HTTPS 反向代理与 `SMA_CENTER_SECURE_COOKIES=true` 会造成来源不匹配，不能作为可用配置。HTTPS 需先实现并测试可信外部来源/代理支持，详见完整手册第 12 节。当前 HTTP 内网部署不要启用 Secure Cookie。
 
 ## 验证
 
