@@ -37,6 +37,7 @@ async function importKey(secret: string) {
 }
 
 function additionalData(userId: string, resourceId: string, keyVersion: number) {
+  // Keep the v1 authentication-data prefix stable so existing SMA tokens remain decryptable after renaming.
   return new TextEncoder().encode(`atlas-sma\0${keyVersion}\0${userId}\0${resourceId}`);
 }
 

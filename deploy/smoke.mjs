@@ -5,7 +5,7 @@ const origin = 'http://127.0.0.1:3000';
 process.chdir('/app');
 const password = readFileSync('/data/bootstrap-admin.txt', 'utf8').match(/password: (.+)/)[1];
 async function login(username, password) {
-  const r = await fetch(origin + '/atlas-login', { method: 'POST', redirect: 'manual', headers: { Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username, password }) });
+  const r = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username, password }) });
   assert.equal(r.status, 303, 'login');
   return r.headers.get('set-cookie').split(';')[0];
 }
@@ -19,13 +19,13 @@ if (process.argv.includes('--after-restart')) {
   console.log('PASS restart persistence and cleanup');
   process.exit(0);
 }
-assert.equal((await fetch(origin + '/api/resources', { headers: { 'oai-authenticated-user-id': 'selfhost:admin', 'oai-authenticated-user-email': 'admin@atlas.local' } })).status, 401, 'forged headers are rejected');
-assert.equal((await fetch(origin + '/api/resources', { headers: { Cookie: 'atlas_session=fake.fake' } })).status, 401);
+assert.equal((await fetch(origin + '/api/resources', { headers: { 'oai-authenticated-user-id': 'selfhost:admin', 'oai-authenticated-user-email': 'admin@sma-center.local' } })).status, 401, 'forged headers are rejected');
+assert.equal((await fetch(origin + '/api/resources', { headers: { Cookie: 'sma_center_session=fake.fake' } })).status, 401);
 assert.equal((await fetch(origin + '/api/resources', { method: 'POST', headers: { Cookie: cookie, Origin: 'http://evil.invalid' }, body: '{}' })).status, 403, 'cross-origin write rejected');
 const page = await api('/');
 assert.equal(page.status, 200, 'dashboard');
 const html = await page.text();
-assert.ok(html.includes('ATLAS'));
+assert.ok(html.includes('sma-center'));
 const asset = html.match(/src="([^\"]*\/_next\/static\/[^"]+\.js[^\"]*)"/);
 assert.ok(asset, 'dashboard has JS');
 assert.equal((await api(asset[1].replaceAll('&amp;', '&'))).status, 200, 'JS served');
@@ -43,7 +43,7 @@ assert.ok(!(await backup.text()).includes(token));
 const accounts = JSON.parse(readFileSync('/data/accounts.json', 'utf8'));
 const testPassword = randomBytes(24).toString('hex');
 const salt = randomBytes(16).toString('hex');
-accounts.push({ username: 'deployment-smoke', email: 'smoke@atlas.local', id: 'selfhost:deployment-smoke', salt, hash: scryptSync(testPassword, salt, 64).toString('hex') });
+accounts.push({ username: 'deployment-smoke', email: 'smoke@sma-center.local', id: 'selfhost:deployment-smoke', salt, hash: scryptSync(testPassword, salt, 64).toString('hex') });
 writeFileSync('/data/accounts.json', JSON.stringify(accounts), { mode: 0o600 });
 try {
   const other = await login('deployment-smoke', testPassword);

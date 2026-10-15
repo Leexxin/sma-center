@@ -1,6 +1,6 @@
 import { getRawDb } from "./index";
 
-export const BACKUP_FORMAT = "atlas-backup-v1";
+export const BACKUP_FORMAT = "sma-center-backup-v1";
 
 type BackupUser = {
   userId: string;
@@ -42,7 +42,7 @@ type BackupResource = {
   updatedAt: number;
 };
 
-export type AtlasBackup = {
+export type SmaCenterBackup = {
   format: typeof BACKUP_FORMAT;
   exportedAt: string;
   users: BackupUser[];
@@ -50,7 +50,7 @@ export type AtlasBackup = {
   resources: BackupResource[];
 };
 
-export async function createFullBackup(): Promise<AtlasBackup> {
+export async function createFullBackup(): Promise<SmaCenterBackup> {
   const db = getRawDb();
   const [usersResult, preferencesResult, resourcesResult] = await Promise.all([
     db.prepare(`SELECT user_id AS userId, email, display_name AS displayName,
@@ -77,10 +77,10 @@ export async function createFullBackup(): Promise<AtlasBackup> {
   };
 }
 
-export function parseBackup(value: unknown): AtlasBackup {
+export function parseBackup(value: unknown): SmaCenterBackup {
   if (!value || typeof value !== "object") throw new Error("INVALID_BACKUP");
   const input = value as Record<string, unknown>;
-  if (input.format !== BACKUP_FORMAT || !Array.isArray(input.users) || !Array.isArray(input.preferences) || !Array.isArray(input.resources)) {
+  if (![BACKUP_FORMAT, "atlas-backup-v1"].includes(String(input.format)) || !Array.isArray(input.users) || !Array.isArray(input.preferences) || !Array.isArray(input.resources)) {
     throw new Error("INVALID_BACKUP");
   }
   if (input.users.length > 1000 || input.preferences.length > 1000 || input.resources.length > 10000) throw new Error("BACKUP_TOO_LARGE");
@@ -100,7 +100,7 @@ export function parseBackup(value: unknown): AtlasBackup {
   };
 }
 
-export async function restoreFullBackup(backup: AtlasBackup, mode: "merge" | "replace") {
+export async function restoreFullBackup(backup: SmaCenterBackup, mode: "merge" | "replace") {
   const db = getRawDb();
   if (mode === "replace") {
     await db.batch([

@@ -22,7 +22,7 @@ export async function GET() {
     return new Response(JSON.stringify(backup, null, 2), {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="atlas-backup-${date}.json"`,
+        "Content-Disposition": `attachment; filename="sma-center-backup-${date}.json"`,
         "Cache-Control": "no-store",
       },
     });
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
     if (code === "INVALID_BACKUP" || code === "BACKUP_TOO_LARGE") {
-      return Response.json({ error: code === "BACKUP_TOO_LARGE" ? "备份内容超过允许数量。" : "这不是有效的 Atlas 备份文件。" }, { status: 400 });
+      return Response.json({ error: code === "BACKUP_TOO_LARGE" ? "备份内容超过允许数量。" : "这不是有效的 sma-center 备份文件。" }, { status: 400 });
     }
     console.error("Failed to restore backup", error);
     return Response.json({ error: "还原失败，现有数据未完整更新。请重试或使用另一份备份。" }, { status: 503 });

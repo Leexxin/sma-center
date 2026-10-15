@@ -332,7 +332,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       if (!response.ok) throw new Error(await readError(response));
       const blob = await response.blob();
       const disposition = response.headers.get("content-disposition") ?? "";
-      const name = disposition.match(/filename="([^"]+)"/)?.[1] ?? `atlas-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const name = disposition.match(/filename="([^"]+)"/)?.[1] ?? `sma-center-backup-${new Date().toISOString().slice(0, 10)}.json`;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -355,11 +355,11 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
     }
     try {
       const backup = JSON.parse(await file.text()) as Record<string, unknown>;
-      if (backup.format !== "atlas-backup-v1" || !Array.isArray(backup.users) || !Array.isArray(backup.preferences) || !Array.isArray(backup.resources)) throw new Error();
+      if (!["sma-center-backup-v1", "atlas-backup-v1"].includes(String(backup.format)) || !Array.isArray(backup.users) || !Array.isArray(backup.preferences) || !Array.isArray(backup.resources)) throw new Error();
       setBackupPreview({ backup, name: file.name, exportedAt: typeof backup.exportedAt === "string" ? backup.exportedAt : undefined, users: backup.users.length, preferences: backup.preferences.length, resources: backup.resources.length });
       setRestoreOpen(true);
     } catch {
-      toast.error("这不是有效的 Atlas 备份文件。");
+      toast.error("这不是有效的 sma-center 备份文件。");
     } finally {
       if (backupInputRef.current) backupInputRef.current.value = "";
     }
@@ -574,7 +574,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       <Toaster position="top-right" richColors />
       <div className={`app-shell theme-${preferences.theme} accent-${preferences.accent} density-${preferences.density} ${preferences.sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="brand-mark"><span>A</span><div><strong>ATLAS</strong><small>PERSONAL HUB</small></div></div>
+        <div className="brand-mark"><span>S</span><div><strong>sma-center</strong><small>PERSONAL HUB</small></div></div>
         <nav aria-label="主导航" className="side-nav">
           <button className={filter === "all" ? "active" : ""} aria-current={filter === "all" ? "page" : undefined} title="总览" onClick={() => selectView("all")}><LayoutDashboard /><b>总览</b></button>
           {preferences.navOrder.map((kind, index) => { const item = kindMeta[kind]; const Icon = item.icon; return <div className="nav-sort-row" key={kind}><button className={filter === kind ? "active" : ""} aria-current={filter === kind ? "page" : undefined} title={item.label} onClick={() => selectView(kind)}><Icon /><b>{kind === "tool" ? "工具库" : item.label}</b><span>{counts[kind]}</span></button>{sortingNav && !preferences.sidebarCollapsed && <div className="nav-move"><button aria-label={`上移${item.label}`} disabled={index === 0} onClick={() => moveNav(kind, -1)}><ArrowUp /></button><button aria-label={`下移${item.label}`} disabled={index === preferences.navOrder.length - 1} onClick={() => moveNav(kind, 1)}><ArrowDown /></button></div>}</div>; })}
@@ -591,7 +591,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
 
       <main className="main-panel">
         <header className="topbar">
-          <div className="mobile-brand"><span>A</span><strong>ATLAS</strong></div>
+          <div className="mobile-brand"><span>S</span><strong>sma-center</strong></div>
           <div className="search-wrap"><Search /><Input ref={searchInputRef} aria-label="搜索工具、站点和服务器" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、分类、网址…" />{query ? <button className="clear-search" aria-label="清空搜索" onClick={() => { setQuery(""); searchInputRef.current?.focus(); }}><X /></button> : <kbd><span>⌘</span><span>K</span></kbd>}</div>
           <div className="topbar-actions"><button className="theme-toggle" onClick={toggleTheme} aria-label={preferences.theme === "dark" ? "切换到明亮模式" : "切换到黑暗模式"} title={preferences.theme === "dark" ? "明亮模式" : "黑暗模式"}>{preferences.theme === "dark" ? <Sun /> : <Moon />}</button><Button onClick={() => startAdd()} className="primary-action"><Plus />添加记录</Button></div>
         </header>
@@ -680,7 +680,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={restoreOpen} onOpenChange={setRestoreOpen}><AlertDialogContent className="restore-dialog"><AlertDialogHeader><AlertDialogTitle>还原全站数据</AlertDialogTitle><AlertDialogDescription>请确认备份范围并选择还原方式。</AlertDialogDescription></AlertDialogHeader>{backupPreview && <div className="restore-preview"><div className="restore-file"><FileJson /><span><strong>{backupPreview.name}</strong><small>{backupPreview.exportedAt ? new Date(backupPreview.exportedAt).toLocaleString("zh-CN") : "Atlas 完整备份"}</small></span></div><div className="restore-counts"><span><b>{backupPreview.users}</b> 位用户</span><span><b>{backupPreview.preferences}</b> 份主页设置</span><span><b>{backupPreview.resources}</b> 条导航记录</span></div><p><strong>合并还原</strong>会保留当前 SMA 凭据；<strong>覆盖还原</strong>会清除全部凭据，且备份文件不会恢复它们。</p></div>}<AlertDialogFooter><AlertDialogCancel disabled={restoring}>取消</AlertDialogCancel><Button variant="outline" disabled={restoring} onClick={() => handleRestore("merge")}>合并还原</Button><AlertDialogAction variant="destructive" disabled={restoring} onClick={() => handleRestore("replace")}>{restoring ? "还原中…" : "覆盖还原"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <AlertDialog open={restoreOpen} onOpenChange={setRestoreOpen}><AlertDialogContent className="restore-dialog"><AlertDialogHeader><AlertDialogTitle>还原全站数据</AlertDialogTitle><AlertDialogDescription>请确认备份范围并选择还原方式。</AlertDialogDescription></AlertDialogHeader>{backupPreview && <div className="restore-preview"><div className="restore-file"><FileJson /><span><strong>{backupPreview.name}</strong><small>{backupPreview.exportedAt ? new Date(backupPreview.exportedAt).toLocaleString("zh-CN") : "sma-center 完整备份"}</small></span></div><div className="restore-counts"><span><b>{backupPreview.users}</b> 位用户</span><span><b>{backupPreview.preferences}</b> 份主页设置</span><span><b>{backupPreview.resources}</b> 条导航记录</span></div><p><strong>合并还原</strong>会保留当前 SMA 凭据；<strong>覆盖还原</strong>会清除全部凭据，且备份文件不会恢复它们。</p></div>}<AlertDialogFooter><AlertDialogCancel disabled={restoring}>取消</AlertDialogCancel><Button variant="outline" disabled={restoring} onClick={() => handleRestore("merge")}>合并还原</Button><AlertDialogAction variant="destructive" disabled={restoring} onClick={() => handleRestore("replace")}>{restoring ? "还原中…" : "覆盖还原"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       </div>
     </>
   );

@@ -132,7 +132,7 @@ export default function DiscoveryDashboard({ server, preferences }: { server: Re
 
   return <div className={`discovery-shell theme-${preferences.theme} accent-${preferences.accent}`}>
     <Toaster position="top-right" richColors />
-    <header className="discovery-topbar"><a href="/" className="back-link"><ArrowLeft />返回工具站</a><div className="discovery-brand"><span>A</span><strong>ATLAS / SMA DISCOVERY</strong></div><div className={`agent-state ${error ? "offline" : loading ? "connecting" : "online"}`}><CircleDot />{error ? "连接异常" : loading ? "正在连接" : "Agent 已连接"}</div></header>
+    <header className="discovery-topbar"><a href="/" className="back-link"><ArrowLeft />返回工具站</a><div className="discovery-brand"><span>S</span><strong>sma-center / SMA DISCOVERY</strong></div><div className={`agent-state ${error ? "offline" : loading ? "connecting" : "online"}`}><CircleDot />{error ? "连接异常" : loading ? "正在连接" : "Agent 已连接"}</div></header>
     <main className="discovery-main">
       <section className="discovery-hero"><div><p className="eyebrow">SERVER INTELLIGENCE</p><h1>{server.name}</h1><p>{server.description || "SMA 自动发现控制台"}</p><div className="server-address"><Server />{server.agentUrl}</div></div><div className="hero-orbit" aria-hidden="true"><Radar /><span /><span /></div></section>
 

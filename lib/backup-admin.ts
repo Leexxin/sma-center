@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
 export function isBackupAdmin(email: string) {
-  const configured = String(env.ATLAS_ADMIN_EMAILS ?? "")
+  const configured = String(env.SMA_CENTER_ADMIN_EMAILS ?? env.ATLAS_ADMIN_EMAILS ?? "")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
