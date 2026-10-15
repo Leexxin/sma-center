@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TotpAuth } from './totp-auth.mjs';
+import { REFERRER_POLICY, validWriteOrigin } from './request-origin.mjs';
 import { setupPage, enrollPage, loginPage, securityPage } from './auth-pages.mjs';
 const directory = process.env.SMA_CENTER_DATA_DIR || new URL('../.sma-center-data/', import.meta.url).pathname;
 mkdirSync(directory, { recursive: true });
@@ -22,7 +23,8 @@ createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
     response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('X-Frame-Options', 'DENY');
-    response.setHeader('Referrer-Policy', 'no-referrer'); response.setHeader('Cache-Control', 'no-store');
+    // Native same-origin form POSTs need a non-opaque Origin for CSRF validation.
+    response.setHeader('Referrer-Policy', REFERRER_POLICY); response.setHeader('Cache-Control', 'no-store');
     for (const name of Object.keys(request.headers)) if (name.startsWith('oai-authenticated-user-') || name.startsWith('sma-center-')) delete request.headers[name];
     const cookies = new Map((request.headers.cookie || '').split(';').map(x => { const at = x.indexOf('='); return [x.slice(0, at).trim(), x.slice(at + 1)]; }));
     const cookie = (name, value, age, path = '/') => `${name}=${value}; Path=${path}; HttpOnly; SameSite=Strict; Max-Age=${age}${process.env.SMA_CENTER_SECURE_COOKIES === 'true' ? '; Secure' : ''}`;
@@ -38,7 +40,7 @@ createServer(async (request, response) => {
     };
     if (url.pathname === '/healthz' && request.method === 'GET') { reply(200, 'ok', 'text/plain'); return; }
     if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(request.method)) { reply(405, 'Method not allowed'); return; }
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && (request.headers.origin !== url.origin || request.headers['sec-fetch-site'] === 'cross-site')) { reply(403, 'Forbidden'); return; }
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !validWriteOrigin(request.headers, url.origin)) { reply(403, '表单来源验证失败，请重新打开当前页面后再提交。'); return; }
     if (url.pathname === '/atlas-login' || url.pathname === '/signin-with-chatgpt') { redirect('/login'); return; }
     if (url.pathname === '/favicon.svg') { reply(200, readFileSync(join(process.cwd(), 'public/favicon.svg')), 'image/svg+xml'); return; }
     if (url.pathname.startsWith('/setup')) {
