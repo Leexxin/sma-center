@@ -67,5 +67,4 @@ const DB = {
 export const env = {
   DB,
   SMA_CREDENTIAL_KEY: process.env.SMA_CREDENTIAL_KEY,
-  SMA_CENTER_ADMIN_EMAILS: process.env.SMA_CENTER_ADMIN_EMAILS || process.env.ATLAS_ADMIN_EMAILS || 'admin@sma-center.local',
 };

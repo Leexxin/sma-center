@@ -1,115 +1,102 @@
 import next from 'next';
+import QRCode from 'qrcode';
 import { createServer } from 'node:http';
-import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-
-const directory = process.env.SMA_CENTER_DATA_DIR || process.env.ATLAS_DATA_DIR || '/data';
+import { TotpAuth } from './totp-auth.mjs';
+import { setupPage, enrollPage, loginPage, securityPage } from './auth-pages.mjs';
+const directory = process.env.SMA_CENTER_DATA_DIR || new URL('../.sma-center-data/', import.meta.url).pathname;
 mkdirSync(directory, { recursive: true });
 const secretsFile = join(directory, 'secrets.json');
 if (!existsSync(secretsFile)) writeFileSync(secretsFile, JSON.stringify({ session: randomBytes(32).toString('hex'), credential: randomBytes(32).toString('base64') }), { mode: 0o600 });
 const secrets = JSON.parse(readFileSync(secretsFile, 'utf8'));
 process.env.SMA_CREDENTIAL_KEY = secrets.credential;
-const accountsFile = join(directory, 'accounts.json');
-function account(username, password, email) {
-  const salt = randomBytes(16).toString('hex');
-  return { username, email, id: `selfhost:${username}`, salt, hash: scryptSync(password, salt, 64).toString('hex') };
-}
-if (!existsSync(accountsFile)) {
-  const password = randomBytes(24).toString('base64url');
-  writeFileSync(accountsFile, JSON.stringify([account('admin', password, 'admin@sma-center.local')]), { mode: 0o600 });
-  writeFileSync(join(directory, 'bootstrap-admin.txt'), `username: admin\npassword: ${password}\n`, { mode: 0o600 });
-  console.log('Initial credentials saved to /data/bootstrap-admin.txt');
-}
-// Provision another isolated tenant; password supplied on stdin.
-const existingAccounts = JSON.parse(readFileSync(accountsFile, 'utf8'));
-if (existingAccounts.some(user => user.id === 'selfhost:admin' && user.email === 'admin@atlas.local')) {
-  for (const user of existingAccounts) if (user.id === 'selfhost:admin' && user.email === 'admin@atlas.local') user.email = 'admin@sma-center.local';
-  writeFileSync(accountsFile, JSON.stringify(existingAccounts), { mode: 0o600 });
-}
-if (process.argv[2] === 'add-user') {
-  const [username, email] = process.argv.slice(3);
-  if (!/^[a-zA-Z0-9_-]{1,40}$/.test(username || '') || !email?.includes('@')) throw new Error('Usage: add-user USERNAME EMAIL (password on stdin)');
-  const password = readFileSync(0, 'utf8').trim();
-  if (password.length < 16) throw new Error('Password must be at least 16 characters');
-  const accounts = JSON.parse(readFileSync(accountsFile, 'utf8'));
-  if (accounts.some(a => a.username === username)) throw new Error('Username already exists');
-  accounts.push(account(username, password, email));
-  writeFileSync(accountsFile, JSON.stringify(accounts), { mode: 0o600 });
-  console.log('User created'); process.exit(0);
-}
-const sign = value => createHmac('sha256', secrets.session).update(value).digest('base64url');
-function session(cookie) {
-  try {
-    const cookies = new Map(cookie?.split(';').map(x => { const at = x.indexOf('='); return [x.slice(0, at).trim(), x.slice(at + 1)]; }));
-    const token = cookies.get('sma_center_session') || cookies.get('atlas_session');
-    if (!token) return null;
-    const [payload, signature] = token.split('.');
-    const expected = sign(payload);
-    if (!signature || signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-    const value = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    if (value.expires < Date.now()) return null;
-    return JSON.parse(readFileSync(accountsFile, 'utf8')).find(a => a.id === value.id) || null;
-  } catch { return null; }
-}
-function loginPage(error = '') {
-  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>登录 sma-center</title><style>body{margin:0;background:#101819;color:#eaf4f2;font:16px system-ui;display:grid;place-items:center;min-height:100vh}form{width:min(320px,80vw);padding:36px;border:1px solid #304542;border-radius:20px;background:#182422}h1{margin-top:0}input,button{box-sizing:border-box;display:block;width:100%;padding:14px;margin:14px 0;border-radius:9px;border:1px solid #46615b;font:inherit}button{background:#5ce5ca;cursor:pointer}p{color:#a3bbb5}.error{color:#ffb6b6}</style><form method="post" action="/login"><h1>sma-center</h1><p>登录你的个人工作台</p><label>账号<input name="username" autocomplete="username" required maxlength="40"></label><label>密码<input name="password" type="password" autocomplete="current-password" required maxlength="256"></label><button>登录</button><p class="error">${error}</p></form></html>`;
-}
-const app = next({ dev: false, hostname: '0.0.0.0', port: Number(process.env.PORT || 3000) });
+const auth = new TotpAuth(directory, secrets.session);
+if (process.argv[2] === 'reset-2fa') { auth.reset(); console.log('2FA reset. Read /data/setup-code.txt to bind again.'); process.exit(0); }
+if (process.argv.length > 2) throw new Error('Only the server-side reset-2fa command is supported.');
+const app = next({ dev: process.env.NODE_ENV === 'development', ...(process.env.NODE_ENV === 'development' ? { webpack: true } : {}), hostname: '0.0.0.0', port: Number(process.env.PORT || 3000) });
 await app.prepare();
-const handle = app.getRequestHandler();
-const attempts = new Map();
-setInterval(() => { for (const [ip, a] of attempts) if (a.until < Date.now()) attempts.delete(ip); }, 60000).unref();
+const handle = app.getRequestHandler(), cookieName = 'sma_center_totp', enrollmentCookie = 'sma_center_enrollment';
 createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
-    response.setHeader('X-Content-Type-Options', 'nosniff');
-    const reply = (status, body) => { response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); response.end(body); };
-    const redirect = path => { response.writeHead(303, { Location: path, 'Cache-Control': 'no-store' }); response.end(); };
-    if (url.pathname === '/healthz') { response.writeHead(200); response.end('ok'); return; }
-    if (url.pathname === '/atlas-login' && request.method === 'GET') { redirect('/login'); return; }
-    // Never trust identity supplied by a browser.
-    for (const name of Object.keys(request.headers)) if (name.startsWith('oai-authenticated-user-')) delete request.headers[name];
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
-      if (request.headers.origin !== url.origin || request.headers['sec-fetch-site'] === 'cross-site') { reply(403, 'Forbidden'); return; }
-    }
-    if (url.pathname === '/signout-with-chatgpt') {
-      response.setHeader('Set-Cookie', ['sma_center_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0', 'atlas_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0']); redirect('/login'); return;
-    }
-    if (['/login', '/atlas-login', '/signin-with-chatgpt'].includes(url.pathname)) {
-      if (request.method === 'POST' && ['/login', '/atlas-login'].includes(url.pathname)) {
-        const ip = request.socket.remoteAddress;
-        const attempt = attempts.get(ip) || { count: 0, until: Date.now() + 15 * 60000 };
-        if (attempt.count >= 10) { reply(429, loginPage('尝试次数过多，请稍后再试')); return; }
-        let body = '';
-        for await (const chunk of request) { body += chunk; if (body.length > 8192) { reply(413, 'Too large'); return; } }
-        const form = new URLSearchParams(body);
-        const user = JSON.parse(readFileSync(accountsFile, 'utf8')).find(a => a.username === form.get('username'));
-        const hash = scryptSync(form.get('password') || '', user?.salt || 'dummy-salt', 64);
-        if (!user || !timingSafeEqual(hash, Buffer.from(user.hash, 'hex'))) {
-          attempt.count++; attempts.set(ip, attempt); reply(401, loginPage('账号或密码错误')); return;
-        }
-        attempts.delete(ip);
-        const payload = Buffer.from(JSON.stringify({ id: user.id, expires: Date.now() + 12 * 3600000 })).toString('base64url');
-        response.setHeader('Set-Cookie', `sma_center_session=${payload}.${sign(payload)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`);
-        redirect('/'); return;
+    response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('X-Frame-Options', 'DENY');
+    response.setHeader('Referrer-Policy', 'no-referrer'); response.setHeader('Cache-Control', 'no-store');
+    for (const name of Object.keys(request.headers)) if (name.startsWith('oai-authenticated-user-') || name.startsWith('sma-center-')) delete request.headers[name];
+    const cookies = new Map((request.headers.cookie || '').split(';').map(x => { const at = x.indexOf('='); return [x.slice(0, at).trim(), x.slice(at + 1)]; }));
+    const cookie = (name, value, age, path = '/') => `${name}=${value}; Path=${path}; HttpOnly; SameSite=Strict; Max-Age=${age}${process.env.SMA_CENTER_SECURE_COOKIES === 'true' ? '; Secure' : ''}`;
+    const reply = (status, body, type = 'text/html; charset=utf-8') => { response.writeHead(status, { 'Content-Type': type }); response.end(body); };
+    const html = (status, body) => { response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"); reply(status, body); };
+    const redirect = path => { response.writeHead(303, { Location: path }); response.end(); };
+    const issue = token => response.setHeader('Set-Cookie', cookie(cookieName, token, auth.state.ttlSeconds));
+    const form = async () => {
+      if (!request.headers['content-type']?.startsWith('application/x-www-form-urlencoded')) throw new Error('INVALID_FORM');
+      let length = 0; const chunks = [];
+      for await (const chunk of request) { length += chunk.length; if (length > 8192) throw new Error('BODY_TOO_LARGE'); chunks.push(chunk); }
+      return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+    };
+    if (url.pathname === '/healthz' && request.method === 'GET') { reply(200, 'ok', 'text/plain'); return; }
+    if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(request.method)) { reply(405, 'Method not allowed'); return; }
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && (request.headers.origin !== url.origin || request.headers['sec-fetch-site'] === 'cross-site')) { reply(403, 'Forbidden'); return; }
+    if (url.pathname === '/atlas-login' || url.pathname === '/signin-with-chatgpt') { redirect('/login'); return; }
+    if (url.pathname === '/favicon.svg') { reply(200, readFileSync(join(process.cwd(), 'public/favicon.svg')), 'image/svg+xml'); return; }
+    if (url.pathname.startsWith('/setup')) {
+      if (auth.state.bound) { redirect('/login'); return; }
+      if (!['GET', 'POST'].includes(request.method)) { reply(405, 'Method not allowed'); return; }
+      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, setupPage('尝试次数过多，请 10 分钟后再试。')); return; }
+      if (url.pathname === '/setup' && request.method === 'GET') { html(200, setupPage()); return; }
+      if (url.pathname === '/setup/authorize' && request.method === 'POST') {
+        const values = await form(), nonce = auth.authorizeSetup(values.get('setupCode'));
+        if (!nonce) { html(401, setupPage('授权码无效，请检查部署时提供的一次性绑定码。')); return; }
+        response.setHeader('Set-Cookie', cookie(enrollmentCookie, nonce, 600, '/setup')); redirect('/setup/verify'); return;
       }
-      reply(200, loginPage()); return;
+      if (['/setup/verify', '/setup/confirm'].includes(url.pathname)) {
+        const nonce = cookies.get(enrollmentCookie), secret = auth.pending(nonce);
+        if (!secret) { redirect('/setup'); return; }
+        if (url.pathname === '/setup/confirm' && request.method === 'POST') {
+          const values = await form(), token = auth.confirmSetup(nonce, values.get('code'));
+          if (token) { response.setHeader('Set-Cookie', [cookie(cookieName, token, auth.state.ttlSeconds), cookie(enrollmentCookie, '', 0, '/setup')]); redirect('/'); return; }
+        } else if (!(url.pathname === '/setup/verify' && request.method === 'GET')) { reply(405, 'Method not allowed'); return; }
+        const uri = `otpauth://totp/sma-center:owner?secret=${secret}&issuer=sma-center&algorithm=SHA1&digits=6&period=30`;
+        const qr = await QRCode.toDataURL(uri, { margin: 1, width: 240, errorCorrectionLevel: 'M' });
+        html(request.method === 'POST' ? 401 : 200, enrollPage(secret, qr, request.method === 'POST' ? '动态码无效，请确认手机时间并重试。' : '')); return;
+      }
+      reply(404, 'Not found'); return;
     }
-    const user = session(request.headers.cookie);
-    if (!user) {
-      if (url.pathname.startsWith('/api/')) { response.writeHead(401, { 'Content-Type': 'application/json' }); response.end('{"error":"请先登录"}'); }
-      else redirect('/login');
+    if (url.pathname === '/login') {
+      if (!auth.state.bound) { redirect('/setup'); return; }
+      if (request.method === 'GET') { html(200, loginPage()); return; }
+      if (request.method !== 'POST') { reply(405, 'Method not allowed'); return; }
+      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, loginPage('尝试次数过多，请 10 分钟后再试。')); return; }
+      const values = await form(), token = auth.login(values.get('code'));
+      if (!token) { html(401, loginPage('动态码无效或已使用，请等待验证器更新后重试。')); return; }
+      issue(token); redirect('/'); return;
+    }
+    const session = auth.session(cookies.get(cookieName));
+    if (!session) {
+      if (url.pathname.startsWith('/api/')) reply(401, JSON.stringify({ error: auth.state.bound ? '请使用验证器动态码登录。' : '请先绑定验证器。', code: auth.state.bound ? 'UNAUTHORIZED' : 'TOTP_NOT_BOUND' }), 'application/json');
+      else redirect(auth.state.bound ? '/login' : '/setup');
       return;
     }
-    request.headers['oai-authenticated-user-id'] = user.id;
-    request.headers['oai-authenticated-user-email'] = user.email;
-    request.headers['oai-authenticated-user-full-name'] = encodeURIComponent(user.username);
-    request.headers['oai-authenticated-user-full-name-encoding'] = 'percent-encoded-utf-8';
+    if (url.pathname === '/logout' || url.pathname === '/signout-with-chatgpt') {
+      if (request.method !== 'POST') { reply(405, 'Method not allowed'); return; }
+      auth.logout(); response.setHeader('Set-Cookie', [cookie(cookieName, '', 0), cookie('sma_center_session', '', 0), cookie('atlas_session', '', 0)]); redirect('/login'); return;
+    }
+    if (url.pathname === '/security') {
+      if (request.method === 'POST') {
+        const values = await form();
+        try { auth.setDuration(Number(values.get('ttlMinutes'))); } catch (error) { html(400, securityPage(auth.state.ttlSeconds / 60, session.expires, error.message)); return; }
+        issue(auth.issueSession()); redirect('/security?saved=1'); return;
+      }
+      if (request.method !== 'GET') { reply(405, 'Method not allowed'); return; }
+      html(200, securityPage(auth.state.ttlSeconds / 60, session.expires, '', url.searchParams.get('saved') === '1')); return;
+    }
+    request.headers['sma-center-authenticated'] = 'totp-v1'; request.headers['sma-center-owner-id'] = session.ownerId;
     await handle(request, response);
   } catch (error) {
-    console.error(error);
-    if (!response.headersSent) response.writeHead(500);
-    response.end('Internal server error');
+    console.error('Request failed', error instanceof Error ? error.name : 'unknown');
+    if (!response.headersSent) response.writeHead(['INVALID_FORM', 'BODY_TOO_LARGE'].includes(error.message) ? 400 : 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    response.end('请求无法完成，请重试。');
   }
-}).listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log('sma-center listening on port 3000'));
+}).listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log(`sma-center single-user TOTP gateway listening on port ${Number(process.env.PORT || 3000)}`));

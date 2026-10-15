@@ -1,4 +1,4 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getOwner } from "@/app/auth";
 import { getServerAgentConnection, SmaCredentialConfigurationError } from "@/db/agent-credentials";
 import { readLimitedJson, smaHeaders } from "@/lib/sma-http";
 
@@ -20,7 +20,7 @@ type SmaSnapshot = {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  const user = await getChatGPTUser();
+  const user = await getOwner();
   if (!user) return Response.json({ error: "请先登录。" }, { status: 401 });
   const { id } = await context.params;
   let config;

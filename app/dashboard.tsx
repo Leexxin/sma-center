@@ -582,10 +582,11 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
         <div className="sidebar-spacer" />
         <div className="sidebar-tools"><button className={`settings-button ${sortingNav ? "active" : ""}`} title="菜单排序" onClick={() => setSortingNav(!sortingNav)}><ListRestart /><b>菜单排序</b></button><button className="collapse-button" title={preferences.sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-label={preferences.sidebarCollapsed ? "展开侧栏" : "收起侧栏"} onClick={() => updateSidebar({ ...preferences, sidebarCollapsed: !preferences.sidebarCollapsed })}>{preferences.sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</button></div>
         <button className="settings-button" title="主页设置" onClick={() => { setSettingsDraft(preferences); setSettingsOpen(true); }}><Settings2 /><b>主页设置</b></button>
+        <button className="settings-button" title="安全设置与登录有效期" onClick={() => window.location.assign('/security')}><ShieldCheck /><b>安全设置</b></button>
         <div className="user-card">
           <div className="avatar">{initials}</div>
-          <div><strong>{user.displayName}</strong><small>{user.email}</small></div>
-          <MoreHorizontal />
+          <div><strong>{user.displayName}</strong><small>单用户 · 验证器保护</small></div>
+          <ShieldCheck />
         </div>
       </aside>
 
@@ -662,7 +663,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>删除这条记录？</AlertDialogTitle><AlertDialogDescription>删除后无法恢复，但不会影响对应的网站或服务器本身。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={handleDelete}>确认删除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="form-dialog settings-dialog"><DialogHeader><DialogTitle>自定义主页</DialogTitle><DialogDescription>这些设置只属于你的账号。</DialogDescription></DialogHeader>
+        <DialogContent className="form-dialog settings-dialog"><DialogHeader><DialogTitle>自定义主页</DialogTitle><DialogDescription>自定义你的个人工作台。</DialogDescription></DialogHeader>
           <div className="settings-form">
             <div className="field"><Label htmlFor="page-name">主页名称</Label><Input id="page-name" value={settingsDraft.pageName} onChange={(e) => setSettingsDraft({ ...settingsDraft, pageName: e.target.value })} /></div>
             <div className="field"><Label htmlFor="greeting">欢迎语</Label><Input id="greeting" value={settingsDraft.greeting} onChange={(e) => setSettingsDraft({ ...settingsDraft, greeting: e.target.value })} /></div>
@@ -670,7 +671,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
             <div className="field"><Label>强调色</Label><div className="color-options">{(["cyan", "violet", "orange"] as Accent[]).map((accent) => <button key={accent} aria-label={`选择 ${accent} 强调色`} className={`${accent} ${settingsDraft.accent === accent ? "selected" : ""}`} onClick={() => setSettingsDraft({ ...settingsDraft, accent })}>{settingsDraft.accent === accent && <Check />}</button>)}</div></div>
             <div className="field"><Label>信息密度</Label><div className="density-options">{(["comfortable", "compact"] as Density[]).map((density) => <button key={density} className={settingsDraft.density === density ? "selected" : ""} onClick={() => setSettingsDraft({ ...settingsDraft, density })}><SlidersHorizontal />{density === "comfortable" ? "舒适" : "紧凑"}</button>)}</div></div>
             {canManageBackups && <section className="backup-panel" aria-labelledby="backup-title">
-              <div className="backup-panel-head"><div className="backup-icon"><DatabaseBackup /></div><div><strong id="backup-title">全站备份与还原</strong><span>用户身份、主页设置和全部导航记录</span></div><ShieldCheck /></div>
+              <div className="backup-panel-head"><div className="backup-icon"><DatabaseBackup /></div><div><strong id="backup-title">全站备份与还原</strong><span>主页设置和全部导航记录；验证器配置需完整数据卷备份</span></div><ShieldCheck /></div>
               <p>备份明确排除 SMA Token、密码和会话凭据。覆盖还原会清除现有 SMA 凭据，之后需逐台重新配置。</p>
               <div className="backup-actions"><Button type="button" variant="outline" onClick={handleBackupDownload} disabled={saving}><Download />{saving ? "生成中…" : "下载完整备份"}</Button><Button type="button" variant="outline" onClick={() => backupInputRef.current?.click()}><Upload />选择备份还原</Button></div>
               <input ref={backupInputRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => handleBackupFile(event.target.files?.[0])} />

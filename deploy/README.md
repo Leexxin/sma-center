@@ -1,15 +1,6 @@
-# Docker 自部署
+# Docker 单用户部署
 
-项目名称、Compose 服务和容器名称统一为 `sma-center`；数据卷为 `sma-center-data`，SQLite 文件为 `/data/sma-center.sqlite`。旧登录链接、会话和 JSON 备份仍兼容，旧数据库首次启动时自动迁移。
-
-该部署使用 Next.js 生产构建、Node 22 和持久化 SQLite，不依赖 Sites 的身份头注入。原 Vinext / Sites 构建入口仍可使用。
-
-## 当前服务器
-
-- 主机名：`sma-center`
-- 地址：`192.168.33.124/24`，网关与 DNS：`192.168.33.1`
-- 项目目录：`/opt/sma-center`
-- 访问地址：`http://192.168.33.124:8080`
+项目目录 `/opt/sma-center`，容器与服务 `sma-center`，外部持久卷 `sma-center-data`，访问地址 `http://192.168.33.124:8080`。
 
 ```sh
 cd /opt/sma-center
@@ -19,38 +10,52 @@ docker compose ps
 docker compose logs --tail=100 sma-center
 ```
 
-默认账号为 `admin`，随机初始密码仅保存在数据卷 `/data/bootstrap-admin.txt`，不会输出到日志或写入源码：
+## 必须绑定验证器
+
+部署后浏览器自动进入 `/setup`。读取一次性绑定授权码：
 
 ```sh
-docker compose exec sma-center cat /data/bootstrap-admin.txt
+docker compose exec -T sma-center cat /data/setup-code.txt
 ```
 
-每个账号拥有独立用户 ID。新增用户时密码从标准输入读取，至少 16 字符：
+输入该码后才会显示二维码和手动绑定密钥。用 Google Authenticator、Microsoft Authenticator 或其他 TOTP 验证器扫描，输入 6 位动态码完成绑定。绑定码随后失效并从卷中删除。绑定确认前，所有面板页面与 API 都被阻止；仅打开二维码不算绑定成功。
 
-```sh
-read -s -p 'New password: ' SMA_CENTER_NEW_PASSWORD
-printf '%s' "$SMA_CENTER_NEW_PASSWORD" | docker compose exec -T sma-center node deploy/server.mjs add-user alice alice@example.com
-unset SMA_CENTER_NEW_PASSWORD
-```
+之后仅使用验证器动态码登录，无账号密码、用户创建或第三方登录方式。验证码不能重放；连续 10 次失败会暂时锁定验证 10 分钟。原账号密码及旧 Cookie 全部失效，旧认证文件归档在服务器私密备份中。
 
-会话通过签名 HttpOnly Cookie 认证，写操作检查 Origin，外部提供的身份头会被删除。管理备份权限通过 Compose 中的 `SMA_CENTER_ADMIN_EMAILS` 配置。
+验证器密钥和二维码始终由本机生成，不向外部二维码服务发送。TOTP 要求服务器和手机时间准确，服务器应保持 NTP 同步。
 
-内网 IP 部署使用 HTTP。需要公网访问时，使用 HTTPS 反向代理并补充 Secure Cookie 配置。
+## 登录有效期
 
-## 持久化与备份
+进入面板后点侧栏“安全设置”（`/security`），可设置 5 分钟到 30 天，默认 12 小时。保存后当前会话重新计时；缩短时长对已有会话同时生效。到期必须重新输入动态码。“退出登录”会撤销所有已有会话。
 
-`sma-center-data` 卷包含 SQLite 数据库、账号密码哈希、会话密钥和 SMA 凭据密钥。保留该卷；切勿执行 `docker compose down -v`。
-首次部署初始化新数据库，不会自动导入 Sites 云端或本机数据。迁移原站点时需导入 JSON 备份，并处理原用户 ID 与自部署账号的关联；SMA 凭据需要重新配置。
-
-页面 JSON 备份不含自部署密码哈希和 SMA 密钥。完整恢复必须备份整个数据卷。使用以下脚本产生权限为 600 的完整备份，会短暂停止服务，随后自动恢复：
+## 完整备份
 
 ```sh
 sh deploy/backup.sh
 ```
 
-恢复时先停止服务，再将可信的完整备份解压到原数据卷目录后启动服务。备份包含密钥和账户哈希，应作为私密文件保管。
+备份位于 `/root/sma-center-backups/`，脚本短暂停止服务以一致地备份整个卷后恢复服务。卷内包含 `sma-center.sqlite`、`secrets.json` 和加密的 `totp-auth.json`，必须一起保留。JSON 页面备份不会备份验证器和服务端密钥。
 
-## 网络
+恢复完整备份应先停止容器，再将可信备份解压到原数据卷后启动。不要删除数据卷或只恢复单个密钥文件。
 
-`/etc/netplan/00-installer-config.yaml` 配置静态 IP；原配置保存在 `/root/sma-center-backup/`。
-Cloud-init 设置 `preserve_hostname: true`，Docker 服务已设置开机启动，Compose 使用 `restart: unless-stopped`。
+## 验证器丢失时
+
+没有可以绕过验证器进入面板的网络接口。只有服务器管理员可以离线重置绑定，原导航和 SMA 密钥保持不变：
+
+```sh
+cd /opt/sma-center
+docker compose stop sma-center
+docker compose run --rm --no-deps sma-center node deploy/server.mjs reset-2fa
+docker compose up -d
+docker compose exec -T sma-center cat /data/setup-code.txt
+```
+
+所有旧会话立即失效，必须使用新绑定码重新绑定并验证后才能进入面板。
+
+## HTTPS
+
+在 HTTPS 反向代理后启用环境变量 `SMA_CENTER_SECURE_COOKIES=true`，并保留浏览器原始 Host。HTTP 内网部署默认不启用 Secure Cookie。
+
+## 验证
+
+`npm test` 包含 RFC 6238 标准向量、强制绑定、重放保护、会话过期、撤销、持久化及数据库迁移测试。`deploy/smoke.mjs` 仅允许在设置 `SMA_CENTER_AUTH_TEST=1` 的一次性 QA 容器执行，禁止在生产卷上绑定测试验证器。

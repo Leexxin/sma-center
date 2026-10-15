@@ -1,4 +1,4 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getOwner } from "@/app/auth";
 import { createFullBackup, parseBackup, restoreFullBackup } from "@/db/backups";
 import { getPreferences, listResources, recordUser } from "@/db/resources";
 import { isBackupAdmin } from "@/lib/backup-admin";
@@ -6,7 +6,7 @@ import { isBackupAdmin } from "@/lib/backup-admin";
 export const dynamic = "force-dynamic";
 
 async function requireAdmin() {
-  const user = await getChatGPTUser();
+  const user = await getOwner();
   if (!user) return { response: Response.json({ error: "请先登录。" }, { status: 401 }) };
   if (!isBackupAdmin(user.email)) return { response: Response.json({ error: "你没有管理备份的权限。" }, { status: 403 }) };
   return { user };

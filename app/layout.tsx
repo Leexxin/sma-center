@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "sma-center · 个人工具站",
-  description: "一个可自定义、支持多用户隔离的工具、站点与服务器导航控制台。",
+  description: "由验证器动态码保护的个人工具、站点与服务器导航工作台。",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

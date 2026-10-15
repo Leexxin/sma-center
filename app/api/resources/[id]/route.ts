@@ -1,4 +1,4 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getOwner } from "@/app/auth";
 import { deleteResource, updateResource } from "@/db/resources";
 import { parseResourceInput } from "@/lib/resource-input";
 import { SmaCredentialConfigurationError } from "@/db/agent-credentials";
@@ -6,7 +6,7 @@ import { SmaCredentialConfigurationError } from "@/db/agent-credentials";
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
-  const user = await getChatGPTUser();
+  const user = await getOwner();
   if (!user) return Response.json({ error: "请先登录。" }, { status: 401 });
   try {
     const { id } = await context.params;
@@ -24,7 +24,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
-  const user = await getChatGPTUser();
+  const user = await getOwner();
   if (!user) return Response.json({ error: "请先登录。" }, { status: 401 });
   try {
     const { id } = await context.params;

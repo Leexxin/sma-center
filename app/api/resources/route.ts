@@ -1,4 +1,4 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getOwner } from "@/app/auth";
 import { createResource, listResources } from "@/db/resources";
 import { parseResourceInput } from "@/lib/resource-input";
 import { SmaCredentialConfigurationError } from "@/db/agent-credentials";
@@ -6,7 +6,7 @@ import { SmaCredentialConfigurationError } from "@/db/agent-credentials";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const user = await getChatGPTUser();
+  const user = await getOwner();
   if (!user) return Response.json({ error: "请先登录。" }, { status: 401 });
   try {
     return Response.json(await listResources(user.userId));
@@ -17,7 +17,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getOwner();
   if (!user) return Response.json({ error: "请先登录。" }, { status: 401 });
   try {
     const input = parseResourceInput(await request.json());

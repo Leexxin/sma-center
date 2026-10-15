@@ -1,10 +1,10 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getOwner } from "@/app/auth";
 import { savePreferences, type Accent, type Density, type ResourceKind, type Theme } from "@/db/resources";
 
 export const dynamic = "force-dynamic";
 
 export async function PUT(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getOwner();
   if (!user) return Response.json({ error: "请先登录。" }, { status: 401 });
   try {
     const body = await request.json() as Record<string, unknown>;

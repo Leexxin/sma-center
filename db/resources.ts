@@ -1,5 +1,5 @@
 import { getRawDb } from "./index";
-import type { ChatGPTUser } from "@/app/chatgpt-auth";
+import type { Owner } from "@/app/auth";
 import { credentialMutationStatement, prepareCredentialMutation } from "./agent-credentials";
 
 export type ResourceKind = "tool" | "site" | "server";
@@ -60,7 +60,7 @@ const starterResources = [
   ["server", "备份节点", "https://backup.example.com", "文件与数据库备份", "存储", "unknown", "每周检查一次", 0, 12, 39, 31, 76, ""],
 ] as const;
 
-export async function recordUser(user: ChatGPTUser) {
+export async function recordUser(user: Owner) {
   const now = Date.now();
   await getRawDb().prepare(`INSERT INTO users (user_id, email, display_name, first_seen_at, last_seen_at)
     VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET email = excluded.email,

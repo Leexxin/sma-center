@@ -10,3 +10,4 @@ dist
 *.tsbuildinfo
 outputs
 work
+.sma-center-data
