@@ -40,4 +40,4 @@ SMA Bearer Token 以 AES-256-GCM 加密并仅在服务端使用。TOTP 种子也
 
 ## SMA 版本中心
 
-侧栏“SMA 版本中心”支持 GitHub Release 与 SFTPGo 镜像逐文件 SHA-256 核对、补齐及确认后覆盖，并按发布标签展示安装、使用和卸载命令。见 [功能与运维说明](docs/sma-release-center.md)。不自动执行安装，不删除镜像历史文件。
+侧栏“SMA 版本中心”按 GitHub Release 标签自动建立 SFTPGo 版本目录，在对应目录内逐文件 SHA-256 核对、补齐及确认后覆盖，并提供带版本直链的原生包安装命令及运维说明。见 [功能与运维说明](docs/sma-release-center.md)。不写共享根目录、不跨版本覆盖、不自动执行安装、不删除镜像历史文件。

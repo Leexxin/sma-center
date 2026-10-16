@@ -10,8 +10,8 @@ import { toast } from 'sonner';
 
 type Asset = { name: string; size: number; digest: string | null; url: string; status?: string };
 type Release = { tag: string; name: string; prerelease: boolean; publishedAt: string; url: string; body: string; assets: Asset[] };
-type Job = { id: string; tag: string; kind: string; status: string; message: string; done: number; total: number; startedAt: string };
-type State = { configured: boolean; targetOrigin: string | null; releases: Release[]; comparison: null | { id: string; tag: string; checkedAt: string; assets: Asset[]; extras: number }; job: Job | null; history: Job[] };
+type Job = { id: string; tag: string; kind: string; layout?: string; status: string; message: string; done: number; total: number; startedAt: string };
+type State = { configured: boolean; targetOrigin: string | null; releases: Release[]; comparison: null | { id: string; tag: string; directory: string; folderExists: boolean; checkedAt: string; assets: Asset[]; extras: number }; job: Job | null; history: Job[] };
 type Commands = { tag: string; platform: string; documents: { path: string; source: string; error: string | null; groups: { title: string; language: string; command: string; dangerous: boolean }[] }[] };
 const labels: Record<string, string> = { missing: '缺失', aligned: 'SHA-256 一致', conflict: '内容冲突', unverified: '缺少摘要' };
 const size = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -111,22 +111,23 @@ export default function ReleaseCenter({ theme, accent }: { theme: string; accent
             {tab === 'files' ? <>
               <div className="release-stats"><div><small>缺失附件</small><strong>{comparison ? missing : '—'}</strong></div><div><small>内容冲突</small><strong>{comparison ? conflicts : '—'}</strong></div><div><small>校验一致</small><strong>{comparison ? aligned : '—'}</strong></div></div>
               <div className="release-actions"><Button variant="outline" onClick={() => act('compare')} disabled={disabled || !state?.configured}><ShieldCheck />核对两边仓库</Button><Button onClick={() => act('sync')} disabled={disabled || !comparison || !assets.length || assets.some(asset => asset.status === 'unverified') || (conflicts > 0 && !overwrite)}><Download />同步所选版本</Button></div>
-              <p className="release-help">核对会下载同名文件计算 SHA-256。同步仅写入所选版本附件，保留其他文件；需要分享地址同时支持读写。</p>
-              {comparison && <label className="release-overwrite"><input type="checkbox" checked={overwrite} disabled={disabled} onChange={event => setOverwrite(event.target.checked)} /><span>允许替换所选版本的冲突文件，包括脚本、校验清单及版本索引。<small>同步旧 Linux 版本可能回退安装源；不会删除其他版本的包。没有原子发布窗口，请避免同时手动上传。</small></span></label>}
+              <p className="release-help">目标版本目录：<strong>/{tag}/</strong>。仅在此目录内进行 SHA-256 比对和上传，不写入根目录、不影响其他版本。{comparison && !comparison.folderExists && '该版本目录尚不存在，同步时会自动创建。'}</p>
+              {comparison && <label className="release-overwrite"><input type="checkbox" checked={overwrite} disabled={disabled} onChange={event => setOverwrite(event.target.checked)} /><span>允许替换 /{tag}/ 内的冲突文件，包括此版本的脚本、校验清单及索引。<small>不会覆盖其他版本目录。单版本内仍不是原子发布，请避免同时手动上传。</small></span></label>}
               {state?.job && <div className={`release-job ${state.job.status}`} role="status" aria-live="polite"><div><strong>{state.job.tag} · {state.job.kind === 'sync' ? '同步' : '核对'}</strong><span>{({ running: '执行中', failed: '失败', completed: '已完成', interrupted: '已中断' } as Record<string, string>)[state.job.status]}</span></div><p>{state.job.message}</p><progress max={Math.max(state.job.total, 1)} value={state.job.done} aria-label="当前阶段文件进度" /><small>{state.job.done} / {state.job.total} · 阶段进度，不代表整体字节百分比</small></div>}
               <div className="release-table-wrap"><table><thead><tr><th>发布附件</th><th>大小</th><th>本地状态</th></tr></thead><tbody>{assets.map(asset => <tr key={asset.name}><td><a href={asset.url} target="_blank" rel="noreferrer">{asset.name}<ArrowUpRight /></a><small title={asset.digest || '缺少可信 SHA-256'}>{asset.digest ? `SHA-256 ${asset.digest.slice(0, 16)}…` : '未提供 SHA-256'}</small></td><td>{size(asset.size)}</td><td><span className={`release-file-state ${asset.status || ''}`}>{labels[asset.status || ''] || '尚未核对'}</span></td></tr>)}</tbody></table></div>
-              {comparison && <p className="release-help">核对时间：{new Date(comparison.checkedAt).toLocaleString('zh-CN')}。额外 {comparison.extras} 个本地项目保持不变。同步前会重新核对。</p>}
+              {comparison && <p className="release-help">核对时间：{new Date(comparison.checkedAt).toLocaleString('zh-CN')}。{comparison.directory}/ 内额外 {comparison.extras} 个项目保持不变。同步前会重新核对。</p>}
               <details className="release-notes"><summary>发布说明</summary><pre>{release.body || '此版本未提供说明。'}</pre></details>
             </> : <div className="release-docs">
               <div className="release-platform" role="group" aria-label="命令平台">{['linux', 'windows'].map(value => <button aria-pressed={platform === value} key={value} onClick={() => { if (platform !== value) { setPlatform(value); setCommandsBusy(true); setCommandsError(''); } }}>{value === 'linux' ? 'Linux' : 'Windows / PowerShell'}</button>)}</div>
               <div className="release-warning"><TriangleAlert /><p>命令来自所选 Release 标签的项目文档，展示不代表执行。先阅读原文和权限要求，再到目标服务器运行。Token 不要粘贴到公开日志；卸载、清理、换 Token 和升级可能中断服务。</p></div>
+              <p className="release-help">镜像按 /{tag}/ 隔离。请使用下方版本目录直链与 SHA-256 校验命令，并仅选择匹配系统和架构的安装包。上游默认自动安装脚本和 sma-ctl upgrade 仍读取根目录，不适用于此布局，相关命令已隐藏；升级请安装目标版本原生包。</p>
               {commandsBusy && <p role="status">正在读取该版本文档…</p>}{commandsError && <p role="alert">{commandsError}</p>}
               {!commandsBusy && commands?.tag === tag && commands.platform === platform && commands.documents.map(document => <section key={document.path}><div className="release-doc-heading"><h3>{document.path}</h3><a href={document.source} target="_blank" rel="noreferrer">阅读完整文档<ArrowUpRight /></a></div>{document.error && <p className="release-warning">{document.error}</p>}{document.groups.map((group, index) => <details className="release-command-group" key={index} open={index === 0}><summary>{group.title}{group.dangerous && <span>含风险操作 · 请先备份</span>}</summary><CommandBlock command={group.command} /></details>)}</section>)}
             </div>}
           </>}
         </section>
       </div>
-      {!!state?.history.length && <details className="release-history"><summary>最近任务记录 · {state.history.length}</summary>{state.history.map(job => <div key={job.id}><span>{new Date(job.startedAt).toLocaleString('zh-CN')} · {job.tag} · {job.kind}</span><strong>{job.status}</strong><p>{job.message}</p></div>)}</details>}
+      {!!state?.history.length && <details className="release-history"><summary>最近任务记录 · {state.history.length}</summary>{state.history.map(job => <div key={job.id}><span>{new Date(job.startedAt).toLocaleString('zh-CN')} · {job.tag} · {job.kind}{job.layout === 'legacy-flat' ? ' · 旧根目录记录' : ` · /${job.tag}/`}</span><strong>{job.status}</strong><p>{job.message}</p></div>)}</details>}
       <footer className="release-footer"><ShieldCheck />先核对，再发布。GitHub 为源，内网为镜像，不反向修改 GitHub，不自动执行安装。</footer>
     </main>
   </div>;
