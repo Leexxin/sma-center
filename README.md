@@ -37,3 +37,7 @@ npm start
 SQLite 自动应用 `drizzle/` 迁移。保留原站点的内部存储标识以兼容现有导航、设置、备份和 SMA 加密凭据，数据库中的内部用户字段不再代表可登录账号。
 
 SMA Bearer Token 以 AES-256-GCM 加密并仅在服务端使用。TOTP 种子也加密保存。JSON 页面备份不包含验证器、会话密钥或 SMA 凭据；灾难恢复应使用完整数据卷备份。
+
+## SMA 版本中心
+
+侧栏“SMA 版本中心”支持 GitHub Release 与 SFTPGo 镜像逐文件 SHA-256 核对、补齐及确认后覆盖，并按发布标签展示安装、使用和卸载命令。见 [功能与运维说明](docs/sma-release-center.md)。不自动执行安装，不删除镜像历史文件。

@@ -10,6 +10,7 @@
 | server.mjs、totp-auth.mjs、auth-pages.mjs、request-origin.mjs、app/auth.ts | 首次绑定、登录有效期、认证恢复、代理限制与排障 |
 | drizzle/、deploy/sqlite-env.mjs、存储或加密逻辑 | 数据目录、迁移、备份恢复与回滚兼容性 |
 | SMA 指标、服务发现、凭据处理 | SMA 配置、网络访问、可见指标和故障判断 |
+| lib/release-sync.mjs、版本中心页面/API | sma-release-center.md、手册配置/备份项，以及同步安全回归测试 |
 | 页面功能、收藏分类、主题、布局设置 | 使用说明、JSON 备份覆盖范围 |
 | 服务器地址、卷、目录、镜像、网络与部署版本 | 手册中的环境信息及 deployment-status.md |
 | 新增文档、迁移文档路径 | docs/README.md 及所有入口链接 |

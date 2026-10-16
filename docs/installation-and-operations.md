@@ -162,6 +162,8 @@ curl -fsS http://192.168.33.124:8080/healthz
 
 ## 8. 数据与配置
 
+SMA Release 与文件服务器同步入口为侧栏“SMA 版本中心”（`/sma/releases`）。配置、核对、冲突覆盖、发布顺序和命令页详见 [SMA 版本中心说明](sma-release-center.md)。默认只读核对；需显式点击同步，不定时自动同步，也不执行安装命令。
+
 | 配置 | 作用 |
 | --- | --- |
 | SMA_CENTER_DATA_DIR | 数据目录；Docker 为 /data，本地默认 .sma-center-data |
@@ -171,6 +173,7 @@ curl -fsS http://192.168.33.124:8080/healthz
 | SMA_CENTER_SECURE_COOKIES | true 时 Cookie 增加 Secure；HTTP 下不要启用，HTTPS 限制见第 12 节 |
 | NEXT_TELEMETRY_DISABLED | 镜像和脚本关闭 Next 遥测 |
 | NODE_OPTIONS | 镜像构建限制 Node 堆为 1536 MiB，不等于容器总内存上限 |
+| SMA_CENTER_GITHUB_TOKEN | 可选服务端 GitHub API 凭据，仅用于版本中心元数据请求，禁止提交 Git |
 
 SMA_CREDENTIAL_KEY 由网关从 secrets.json 注入，不能随意设置一个新值替换已有密钥。历史账号或第三方认证变量不再作为当前登录配置。
 
@@ -180,6 +183,7 @@ SMA_CREDENTIAL_KEY 由网关从 secrets.json 注入，不能随意设置一个�
 - `secrets.json`：会话签名和凭据加密所需密钥，必须和数据一起备份。
 - `totp-auth.json`：加密 TOTP 种子、会话代次、登录时长及认证状态。
 - `setup-code.txt`：仅未绑定或重置后存在的一次性绑定授权码。
+- `release-sync.json`：版本中心的加密分享配置、核对结果及任务记录，整卷备份包含，页面 JSON 备份不包含。
 
 SQLite 启动时自动应用 `drizzle/` 中迁移；旧 atlas 数据文件/迁移记录有兼容迁移逻辑。历史内部存储标识和加密上下文不可随意改名。不要手工删用户字段、迁移记录或单独替换密钥。迁移不是自动可逆的，升级前必须备份。
 
