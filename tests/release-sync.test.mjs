@@ -50,6 +50,7 @@ function fixture(t, options = {}) {
       assert.equal(url.searchParams.get('mkdir_parents'), 'true');
       assert.ok(name.startsWith(release.tag_name + '/'), 'uploads must stay inside the selected version');
       writes.push(name);
+      if (options.partialUpload && name.endsWith('/sma.deb')) { folders.add(release.tag_name); mirror.set(name, Buffer.from(init.body).subarray(0, 3)); return new Response('connection interrupted', { status: 500 }); }
       if (options.failPackage && name.endsWith('/sma.deb')) return new Response('fail', { status: 500 });
       folders.add(release.tag_name);
       mirror.set(name, Buffer.from(init.body)); return new Response('ok', { status: 201 });
@@ -210,4 +211,15 @@ test('Windows version downloads terminate on errors and verify the exact publish
   const command = result.documents[0].groups[0].command;
   assert.match(command, /\$ErrorActionPreference = 'Stop'/); assert.match(command, /%2Fv1\.0\.0%2Fsma_windows\.msi/);
   assert.match(command, /Get-FileHash/); assert.match(command, /ExitCode -notin @\(0, 3010\)/);
+});
+test('an interrupted partial upload becomes a conflict and is only repaired with explicit consent', async t => {
+  const options = { partialUpload: true };
+  const { service, mirror, writes } = fixture(t, options); await compare(service);
+  service.start('sync', 'v1.0.0'); await service.pending; assert.equal(service.status().job.status, 'failed');
+  assert.equal(mirror.get('v1.0.0/sma.deb').toString(), 'pac');
+  options.partialUpload = false; await compare(service);
+  assert.equal(service.status().comparison.assets[0].status, 'conflict');
+  service.start('sync', 'v1.0.0'); await service.pending; assert.equal(writes.length, 1);
+  service.start('sync', 'v1.0.0', true); await service.pending;
+  assert.equal(service.status().job.status, 'completed'); assert.equal(mirror.get('v1.0.0/sma.deb').toString(), 'package');
 });
