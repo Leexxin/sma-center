@@ -76,6 +76,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import type { LiveSnapshot } from "@/lib/sma-metrics";
 import type { Accent, Density, Preferences, Resource, ResourceKind, ResourceStatus, ResourceWrite, Theme } from "@/db/resources";
 
 type DashboardProps = {
@@ -96,21 +97,7 @@ type BackupPreview = {
 
 type ResourceDraft = ResourceWrite;
 
-type LiveSnapshot = {
-  schemaVersion: "v1";
-  timestamp?: string;
-  hostname: string;
-  cpu: { logicalCount: number; totalSeconds: number; idleSeconds: number };
-  memory: null | Record<string, number>;
-  filesystems: Array<Record<string, string | number | boolean>>;
-  disks: Array<Record<string, string | number>>;
-  load: null | { load1?: number; load5?: number; load15?: number };
-  uptimeSeconds: number | null;
-  bootTimeSeconds: number | null;
-  errors: Array<{ collector?: string; code?: string; message?: string }>;
-};
-
-type ServerMonitor = { snapshot?: LiveSnapshot; cpuUsage?: number; loading?: boolean; error?: string };
+type ServerMonitor = { snapshot?: LiveSnapshot; agentVersion?: string | null; loading?: boolean; error?: string };
 
 const emptyDraft: ResourceDraft = {
   kind: "tool",
@@ -150,14 +137,15 @@ function hostname(url: string) {
 }
 
 function formatBytes(value?: number) {
-  if (!value || value < 0) return "—";
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  if (value == null || !Number.isFinite(value) || value < 0) return "—";
+  if (value === 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
 }
 
 function formatDuration(value?: number | null) {
-  if (!value) return "—";
+  if (value == null) return "—";
   const days = Math.floor(value / 86400);
   const hours = Math.floor((value % 86400) / 3600);
   return days ? `${days} 天 ${hours} 小时` : `${hours} 小时`;
@@ -190,7 +178,6 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
   const [serverMonitors, setServerMonitors] = useState<Record<string, ServerMonitor>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
-  const rawSnapshotsRef = useRef<Record<string, LiveSnapshot>>({});
 
   const counts = useMemo(() => ({
     tool: resources.filter((item) => item.kind === "tool").length,
@@ -502,26 +489,26 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
   useEffect(() => {
     if (!monitoredServers.length) return;
     let active = true;
+    const pending = new Set<string>();
     async function load(resource: Resource) {
+      if (pending.has(resource.id)) return;
+      pending.add(resource.id);
       setServerMonitors((current) => ({ ...current, [resource.id]: { ...current[resource.id], loading: true } }));
       try {
         const response = await fetch(`/api/resources/${resource.id}/snapshot`, { cache: "no-store" });
         const payload = await response.json() as LiveSnapshot & { error?: string };
-        if (!response.ok) throw new Error(payload.error || "读取指标失败");
-        const previous = rawSnapshotsRef.current[resource.id];
-        const deltaTotal = previous ? payload.cpu.totalSeconds - previous.cpu.totalSeconds : 0;
-        const deltaIdle = previous ? payload.cpu.idleSeconds - previous.cpu.idleSeconds : 0;
-        const cpuUsage = deltaTotal > 0 && deltaIdle >= 0 ? Math.max(0, Math.min(100, (1 - deltaIdle / deltaTotal) * 100)) : undefined;
-        rawSnapshotsRef.current[resource.id] = payload;
-        if (active) setServerMonitors((current) => ({ ...current, [resource.id]: { snapshot: payload, cpuUsage, loading: false } }));
+        if (!response.ok) {
+          if (active) setServerMonitors((current) => ({ ...current, [resource.id]: { loading: false, error: payload.error || "读取指标失败", agentVersion: payload.agentVersion } }));
+          return;
+        }
+        if (active) setServerMonitors((current) => ({ ...current, [resource.id]: { snapshot: payload, loading: false } }));
       } catch (error) {
-        if (active) setServerMonitors((current) => ({ ...current, [resource.id]: { ...current[resource.id], loading: false, error: error instanceof Error ? error.message : "读取指标失败" } }));
-      }
+        if (active) setServerMonitors((current) => ({ ...current, [resource.id]: { loading: false, error: error instanceof Error ? error.message : "读取指标失败" } }));
+      } finally { pending.delete(resource.id); }
     }
     monitoredServers.forEach(load);
-    const warmup = window.setTimeout(() => monitoredServers.forEach(load), 1200);
     const interval = window.setInterval(() => monitoredServers.forEach(load), 30_000);
-    return () => { active = false; window.clearTimeout(warmup); window.clearInterval(interval); };
+    return () => { active = false; window.clearInterval(interval); };
   }, [monitoredServers]);
 
   const initials = user.displayName.trim().slice(0, 2).toUpperCase();
@@ -533,15 +520,15 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
     const status = statusMeta[resource.status];
     const monitor = serverMonitors[resource.id];
     const snapshot = monitor?.snapshot;
-    const memoryUsage = snapshot?.memory?.totalBytes ? (1 - Number(snapshot.memory.availableBytes ?? 0) / Number(snapshot.memory.totalBytes)) * 100 : undefined;
-    const rootFs = snapshot?.filesystems.find((item) => item.mountpoint === "/") ?? snapshot?.filesystems[0];
-    const filesystemUsage = rootFs && Number(rootFs.sizeBytes) > 0 ? (1 - Number(rootFs.availableBytes ?? 0) / Number(rootFs.sizeBytes)) * 100 : undefined;
-    const load1 = snapshot?.load?.load1;
+    const memoryUsage = snapshot?.metrics.memoryPercent;
+    const filesystemUsage = snapshot?.metrics.systemDiskPercent;
+    const cpuUsage = snapshot?.metrics.cpuPercent;
+    const load1 = snapshot?.errors.some((e) => e.collector === "load") ? undefined : snapshot?.load?.load1;
     const primaryMetrics = [
-      { label: "CPU", value: monitor?.cpuUsage, display: monitor?.cpuUsage == null ? "—" : `${Math.round(monitor.cpuUsage)}%`, icon: Cpu },
+      { label: "CPU", value: cpuUsage, display: cpuUsage == null ? "—" : `${Math.round(cpuUsage)}%`, icon: Cpu },
       { label: "内存", value: memoryUsage, display: memoryUsage == null ? "—" : `${Math.round(memoryUsage)}%`, icon: MemoryStick },
-      { label: "根分区", value: filesystemUsage, display: filesystemUsage == null ? "—" : `${Math.round(filesystemUsage)}%`, icon: HardDrive },
-      { label: "负载", value: load1 == null ? undefined : Math.min(100, (load1 / Math.max(snapshot?.cpu.logicalCount ?? 1, 1)) * 100), display: load1 == null ? "—" : load1.toFixed(2), icon: Activity },
+      { label: "系统盘", value: filesystemUsage, display: filesystemUsage == null ? "—" : `${Math.round(filesystemUsage)}%`, icon: HardDrive },
+      { label: "负载", value: undefined, display: load1 == null ? "—" : load1.toFixed(2), icon: Activity },
     ];
     return (
       <article className={`resource-card ${favorite ? "favorite-card" : ""}`} key={`${favorite ? "favorite" : "all"}-${resource.id}`}>
@@ -550,16 +537,17 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
         <div className="resource-copy"><div className="resource-title"><h3>{resource.name}</h3></div><p>{resource.description || "暂无说明"}</p></div>
         <div className="resource-meta"><span>{resource.category}</span>{resource.kind !== "tool" && <span className={status.className}><CircleDot />{status.label}</span>}</div>
         {resource.kind === "server" && <HoverCard openDelay={260} closeDelay={120}><HoverCardTrigger asChild><div className={`server-metrics ${monitor?.loading ? "loading" : ""}`} tabIndex={0} aria-label={`${resource.name} SMA 实时指标`}>
-          {primaryMetrics.map((metric) => { const MetricIcon = metric.icon; const level = (metric.value ?? 0) >= 85 ? "critical" : (metric.value ?? 0) >= 70 ? "warning" : "normal"; return <div className={`metric ${level}`} key={metric.label}><div><span><MetricIcon />{metric.label}</span><strong>{metric.display}</strong></div><div className="metric-track"><span style={{ transform: `scaleX(${Math.min((metric.value ?? 0) / 100, 1)})` }} /></div></div>; })}
+          {primaryMetrics.map((metric) => { const MetricIcon = metric.icon; const level = (metric.value ?? 0) >= 85 ? "critical" : (metric.value ?? 0) >= 70 ? "warning" : "normal"; return <div className={`metric ${level}`} key={metric.label}><div><span><MetricIcon />{metric.label}</span><strong>{metric.display}</strong></div>{metric.label !== "负载" && <div className="metric-track"><span style={{ transform: `scaleX(${Math.min((metric.value ?? 0) / 100, 1)})` }} /></div>}</div>; })}
           {!resource.agentUrl && <span className="monitor-state">悬浮查看 · 尚未接入 SMA</span>}{resource.agentUrl && monitor?.loading && !snapshot && <span className="monitor-state"><RefreshCw />正在建立采样基线</span>}{monitor?.error && <span className="monitor-state error">{monitor.error}</span>}
         </div></HoverCardTrigger><HoverCardContent className="server-detail-card" side="bottom" align="start" sideOffset={12}>
-          <div className="detail-head"><div><span className="detail-status" /><div><strong>{snapshot?.hostname ?? resource.name}</strong><small>SMA {snapshot?.schemaVersion ?? "v1"} · {snapshot?.timestamp ? new Date(snapshot.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "等待快照"}</small></div></div>{monitor?.loading && <RefreshCw className="spin" />}</div>
+          <div className="detail-head"><div><span className="detail-status" /><div><strong>{snapshot?.hostname ?? resource.name}</strong><small>SMA {snapshot?.agentVersion ?? monitor?.agentVersion ?? "未知"} · 协议 {snapshot?.schemaVersion ?? "未知"}</small><small>{snapshot ? `${snapshot.host.os} / ${snapshot.host.architecture} · ${new Date(snapshot.timestamp).toLocaleTimeString("zh-CN")}` : "等待快照"}</small></div></div>{monitor?.loading && <RefreshCw className="spin" />}</div>
           {!resource.agentUrl ? <div className="monitor-empty"><Server /><strong>配置 SMA Agent 地址</strong><p>在编辑服务器中填写例如 http://10.0.0.10:9108，本站后端会代理读取 /v1/snapshot。</p></div> : monitor?.error && !snapshot ? <div className="monitor-empty error"><Cloud /><strong>暂时无法读取</strong><p>{monitor.error}</p></div> : snapshot && <>
-            <div className="detail-summary"><div><Cpu /><span>逻辑 CPU</span><strong>{snapshot.cpu.logicalCount || "—"}</strong></div><div><Clock3 /><span>运行时间</span><strong>{formatDuration(snapshot.uptimeSeconds)}</strong></div><div><Activity /><span>负载 1 / 5 / 15</span><strong>{[snapshot.load?.load1, snapshot.load?.load5, snapshot.load?.load15].map((v) => v == null ? "—" : v.toFixed(2)).join(" / ")}</strong></div></div>
+            <div className="detail-summary"><div><Cpu /><span>逻辑 CPU</span><strong>{snapshot.cpu?.logicalCount || "—"}</strong></div><div><Clock3 /><span>运行时间</span><strong>{snapshot.errors.some((e) => e.collector === "uptime") ? "—" : formatDuration(snapshot.uptimeSeconds)}</strong></div><div><Activity /><span>负载 1 / 5 / 15</span><strong>{snapshot.errors.some((e) => e.collector === "load") ? "—" : [snapshot.load?.load1, snapshot.load?.load5, snapshot.load?.load15].map((v) => v == null ? "—" : v.toFixed(2)).join(" / ")}</strong></div></div>
             <div className="detail-section"><h4>内存</h4><div className="detail-pairs"><span>总量 <b>{formatBytes(snapshot.memory?.totalBytes)}</b></span><span>可用 <b>{formatBytes(snapshot.memory?.availableBytes)}</b></span><span>缓存 <b>{formatBytes(snapshot.memory?.cachedBytes)}</b></span><span>Swap 可用 <b>{formatBytes(snapshot.memory?.swapFreeBytes)}</b></span></div></div>
-            <div className="detail-section"><h4>文件系统</h4><div className="detail-list">{snapshot.filesystems.slice(0, 4).map((fs) => <div key={`${fs.device}-${fs.mountpoint}`}><span><b>{String(fs.mountpoint)}</b><small>{String(fs.device)} · {String(fs.filesystemType)}</small></span><strong>{formatBytes(Number(fs.availableBytes))} 可用</strong></div>)}</div></div>
-            <div className="detail-section"><h4>磁盘 I/O</h4><div className="detail-list">{snapshot.disks.slice(0, 4).map((disk) => <div key={String(disk.device)}><span><b>{String(disk.device)}</b><small>当前 I/O {Number(disk.ioInProgress ?? 0)}</small></span><strong>读 {formatBytes(Number(disk.readBytes))} · 写 {formatBytes(Number(disk.writtenBytes))}</strong></div>)}</div></div>
-            {!!snapshot.errors.length && <div className="collector-errors">{snapshot.errors.map((item, index) => <span key={`${item.collector}-${index}`}>{item.collector}: {item.message ?? item.code}</span>)}</div>}
+            <div className="detail-section"><h4>文件系统 · 系统盘 {snapshot.host.systemMountpoint}</h4><div className="detail-list">{!snapshot.filesystems.length && <span>无数据</span>}{snapshot.filesystems.map((fs) => <div key={`${fs.device}-${fs.mountpoint}`}><span><b>{fs.mountpoint}</b><small>{fs.device} · {fs.filesystemType}</small></span><strong>{formatBytes(fs.availableBytes)} / {formatBytes(fs.sizeBytes)} 可用</strong></div>)}</div></div>
+            <div className="detail-section"><h4>磁盘 I/O · 相邻采样速率</h4><div className="detail-list">{!snapshot.disks.length && <span>无数据</span>}{snapshot.disks.map((disk, index) => { const rate = snapshot.metrics.diskRates[index]; return <div key={disk.device}><span><b>{disk.device}</b><small>当前 I/O {disk.ioInProgress ?? "—"} · IOPS 读 {rate?.readIOPS?.toFixed(1) ?? "—"} / 写 {rate?.writeIOPS?.toFixed(1) ?? "—"}</small></span><strong>读 {rate?.readBytesPerS == null ? "—" : `${formatBytes(rate.readBytesPerS)}/s`} · 写 {rate?.writeBytesPerS == null ? "—" : `${formatBytes(rate.writeBytesPerS)}/s`}</strong></div>; })}</div></div>
+            {!!snapshot.host.unsupportedMetrics.length && <div className="collector-errors"><span>平台不支持：{snapshot.host.unsupportedMetrics.join("、")}</span></div>}
+            {!!snapshot.errors.length && <div className="collector-errors">{snapshot.errors.map((item, index) => <span key={`${item.collector}-${index}`}>{item.collector} 采集异常：{item.code}</span>)}</div>}
           </>}
         </HoverCardContent></HoverCard>}
         {resource.kind === "server" && resource.agentUrl && snapshot && !monitor?.error && <a href={`/servers/${resource.id}`} className="sma-console-link"><span><Radar /><b>SMA 自动发现</b></span><ChevronRight /></a>}
