@@ -26,7 +26,8 @@ export function normalizeSnapshot(input: unknown, receivedAt = new Date().toISOS
   function numbers(value: unknown, prefix: string, fields: string[]): Numbers {
     const source = object(value), result: Numbers = {};
     const collector = prefix === "filesystems" ? "filesystem" : prefix === "disks" ? "disk" : prefix.split(".")[0];
-    if (errors.some((e) => e.collector === collector)) return result;
+    // Filesystem enumeration can fail for one mount while returning valid others.
+    if (collector !== "filesystem" && errors.some((e) => e.collector === collector)) return result;
     for (const field of fields) {
       const n = number(source[field]);
       if (n !== null && !unsupported.some((p) => p === collector || p === prefix || p === `${prefix}.${field}` || p === `${prefix}[].${field}` || p === `${collector}.${field}`)) result[field] = n;
@@ -58,7 +59,12 @@ export function percent(total?: number, available?: number): number | null {
   return total != null && total > 0 && available != null ? Math.max(0, Math.min(100, (1 - available / total) * 100)) : null;
 }
 function compatible(previous: Snapshot | undefined, current: Snapshot): previous is Snapshot {
-  return !!previous && current.hostname === previous.hostname && current.host.os === previous.host.os && current.host.architecture === previous.host.architecture && current.agentVersion === previous.agentVersion && current.bootTimeSeconds === previous.bootTimeSeconds && !(current.uptimeSeconds != null && previous.uptimeSeconds != null && current.uptimeSeconds < previous.uptimeSeconds) && Date.parse(current.timestamp) > Date.parse(previous.timestamp);
+  if (!previous) return false;
+  const a = previous.bootTimeSeconds, b = current.bootTimeSeconds;
+  // Windows derives boot time from wall clock - uptime; successive values jitter
+  // by milliseconds. Keep integer Linux boot IDs exact, tolerate <=1s otherwise.
+  const sameBoot = a === b || (a != null && b != null && (!Number.isInteger(a) || !Number.isInteger(b)) && Math.abs(a - b) <= 1);
+  return current.hostname === previous.hostname && current.host.os === previous.host.os && current.host.architecture === previous.host.architecture && current.agentVersion === previous.agentVersion && sameBoot && !(current.uptimeSeconds != null && previous.uptimeSeconds != null && current.uptimeSeconds < previous.uptimeSeconds) && Date.parse(current.timestamp) > Date.parse(previous.timestamp);
 }
 export function cpuPercent(previous: Snapshot | undefined, current: Snapshot): number | null {
   if (!compatible(previous, current) || failed(previous, "cpu") || failed(current, "cpu") || !previous.cpu || !current.cpu || previous.cpu.logicalCount !== current.cpu.logicalCount || !current.cpu.logicalCount) return null;
@@ -82,7 +88,7 @@ export function metrics(current: Snapshot, previous?: Snapshot) {
   return {
     cpuPercent: cpuPercent(previous, current),
     memoryPercent: failed(current, "memory") ? null : percent(current.memory?.totalBytes, current.memory?.availableBytes),
-    systemDiskPercent: failed(current, "filesystem") ? null : percent(root?.sizeBytes, root?.availableBytes),
+    systemDiskPercent: percent(root?.sizeBytes, root?.availableBytes),
     diskRates: current.disks.map((disk) => {
       const old = usablePrevious?.disks.find((d) => d.device === disk.device);
       const seconds = usablePrevious ? (Date.parse(current.timestamp) - Date.parse(usablePrevious.timestamp)) / 1000 : 0;

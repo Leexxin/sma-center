@@ -107,3 +107,18 @@ test("true idle and zero disk throughput remain zero rather than unavailable", (
   const result = metrics(normalizeSnapshot(b), normalizeSnapshot(a));
   assert.equal(result.cpuPercent, 0); assert.equal(result.diskRates[0].readBytesPerS, 0); assert.equal(result.diskRates[0].writeIOPS, 0);
 });
+test("partial filesystem failure preserves valid root capacity and still reports the collector error", () => {
+  const input = raw(); input.errors = [{ collector: "filesystem", code: "collection_failed" }];
+  const snapshot = normalizeSnapshot(input);
+  assert.equal(metrics(snapshot).systemDiskPercent, 75);
+  assert.equal(snapshot.errors[0].collector, "filesystem");
+  snapshot.filesystems = [];
+  assert.equal(metrics(snapshot).systemDiskPercent, null);
+});
+test("derived fractional boot time jitter does not reset Windows CPU/IO; real reboot still does", () => {
+  const a = normalizeSnapshot(raw()), b = normalizeSnapshot(raw(1));
+  a.bootTimeSeconds = 1792079388.069; b.bootTimeSeconds = 1792079388.074;
+  assert.ok(metrics(b, a).cpuPercent! > 0); assert.equal(metrics(b, a).diskRates[0].readIOPS, 1);
+  b.bootTimeSeconds += 2; assert.equal(metrics(b, a).cpuPercent, null);
+  b.bootTimeSeconds = a.bootTimeSeconds; b.uptimeSeconds = 1; assert.equal(metrics(b, a).cpuPercent, null);
+});
