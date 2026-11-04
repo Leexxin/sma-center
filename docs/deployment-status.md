@@ -1,8 +1,22 @@
 # 部署核对记录
 
-最近核对日期：2026-10-17（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
+最近核对日期：2026-11-04（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
 
-## 2026-10-17 SMA 指标规范对齐（当前部署）
+## 2026-11-04 HTTP IP SSO 上线（当前部署）
+
+- 功能提交 `275b791`、HTTP IP 修正 `049016b`，经 [PR #1](https://github.com/Leexxin/sma-center/pull/1) 合并至 main；本次生产业务源码为合并提交 `0bf65bd9b17d3684a53da8050a52ab2716f9525c`。本节为后续部署记录，不改变业务镜像。
+- 生产地址仍为 `http://192.168.33.124:8080`，不要求 HTTPS、域名或证书。明确配置的 `SMA_CENTER_SSO_ISSUER` 与此地址相同，`SMA_CENTER_SECURE_COOKIES=false`，客户端表路径 `/data/oidc-clients.json`。
+- 原 Compose 配置和端口保留，新增现场文件 `/opt/sma-center/compose.override.yaml`，由普通 `docker compose` 自动加载；运行标签确认同时使用原 compose.yaml 和该覆盖文件。后续升级、备份与回滚需保留现场覆盖配置，不能只核对基础 compose.yaml。没有修改网卡、防火墙、外部卷名或 TOTP 绑定。
+- 完整数据备份 `/root/sma-center-backups/sma-center-20261104-082343.tar.gz`，已检查归档可读；源码快照 `/root/sma-center-backups/source-before-sso-20261104-082342.tar.gz`；旧镜像保留为 `sma-center:before-sso-20261104-082342`。文件名使用服务器 UTC，北京时间为 2026-11-04 下午。备份时短暂停止并恢复服务，构建完成后再切换新容器。
+- 在服务器成功完成 Docker/Next.js 生产构建；业务镜像另标记为 `sma-center:0bf65bd9b17d`，运行容器镜像标识为 `sha256:0c4a78dc128eb7e31db89770331a0838205ddddcad0479afcbdb3f8354079f9e`，状态 running/healthy。
+- `/healthz` 返回 200/ok；`/.well-known/openid-configuration` 返回固定 HTTP IP issuer 和 S256；`/oidc/jwks` 返回一个 RS256 公钥，不含私钥字段。未登录 `/applications` 返回 303 至登录页、`/api/resources` 返回 401，伪造内部身份头仍为 401，伪造 Origin 的写请求返回 403。浏览器实际打开生产入口显示原 TOTP 动态码登录页。
+- 升级前后均有 12 条资源、1 条用户偏好、7 条 SMA 凭据，7 条原 Agent 凭据均能成功解密。`secrets.json` 字节摘要保持一致，TOTP 加密种子、ownerId、会话代次与升级前备份一致；没有输出 Token、种子、Cookie 或备份内容，没有重新绑定/重置验证器，也未强制退出已有中心会话。
+- 升级前版本同步任务为 completed，未在同步传输中途重启。数据仍来自同一独立外部卷 `sma-center-data`。启用 SSO 时创建空客户端表并由服务首次生成签名密钥，没有覆盖既有主密钥或数据库；验收时注册客户端数为 0，没有自动注册 Software Vault、量化平台或替业务系统轮换凭据。
+- 交付后核对已合并版本的全部 170 个 Git 跟踪文件：服务器源码与运行容器均通过 SHA-256 对比。后续文档记录为独立提交，应区别于本次业务镜像所含文档快照。
+- 本地 Node 22.22.0 完整测试 62/62 通过、无跳过，含两个不同 HTTP 主机的隔离浏览器登录/退出回归；lint 和本地生产构建通过。仓库未配置 GitHub Actions 工作流，本次没有声称远端 CI 通过。服务器已验证公开 SSO 接口及数据/鉴权保留，但尚未在生产注册实际业务客户端或完成 Software Vault 的真实回调联调；原有 Agent 网络可达性未重新逐台验收。
+- 详细接入与注册步骤见 [SSO 手册](sso-integration.md)。回滚到旧业务镜像时，也需还原本次前的 Compose 配置（包括移除本次新增的 SSO 覆盖文件），保留数据卷；不要通过删除密钥或恢复空卷实现回滚。本次没有实际执行回滚或数据恢复演练。
+
+## 2026-10-17 SMA 指标规范对齐（历史部署）
 
 - 功能提交 `dba8952`，真实 Agent 联调修正提交 `54c0831`，均已推送 `Leexxin/sma-center` 的 main。最终生产业务镜像对应 `54c0831`；部署记录为后续文档提交，不改变业务镜像。
 - 部署目录仍为 `/opt/sma-center`，通过 Git 归档交付、Docker Compose 构建和切换；没有数据库迁移、网络调整、认证重置或凭据轮换。独立外部卷仍为 `sma-center-data`。

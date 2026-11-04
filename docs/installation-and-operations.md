@@ -1,6 +1,6 @@
 # sma-center 全流程安装与运维手册
 
-适用范围：单用户 TOTP 自托管实现；2026-11-04 增补可选 SSO（尚不代表生产启用）。变更时按[维护约定](maintenance.md)同步更新；当前部署快照见[部署核对记录](deployment-status.md)。
+适用范围：单用户 TOTP 自托管实现；2026-11-04 已部署可选 HTTP IP SSO，实际验收范围见部署记录。变更时按[维护约定](maintenance.md)同步更新；当前部署快照见[部署核对记录](deployment-status.md)。
 
 ## 1. 项目是什么
 
@@ -406,3 +406,7 @@ SMA_CENTER_BROWSER_TEST=1 npm test
 发布验收：容器健康、实际入口可达、未认证被拦截、原验证器可登录、旧数据保留、资源/收藏/主题可保存、SMA 可连接、备份可读、部署源码与发布版本一致。恢复和破坏性测试只在隔离副本验证。
 
 当前未实现/未配置：多用户/多租户、密码登录、自动 Git 同步部署、定时异地备份及清理、持续监控告警、生产 HTTPS 反向代理验收。后续新增能力必须修改本节及维护约定中的相关操作说明。
+
+## 15. 当前 HTTP IP SSO 部署
+
+2026-11-04 已在 `http://192.168.33.124:8080` 启用 SSO issuer。现场 `/opt/sma-center/compose.override.yaml` 自动加载 SSO 环境配置，Secure Cookie 为 false，仍使用原外部卷 `sma-center-data`。普通 `docker compose` 命令会自动合并该文件；不要在后续更新中遗漏它或无意改用仅含基础文件的显式 `-f` 命令。完整配置与客户端管理见 [SSO 接入手册](sso-integration.md)，本次镜像、备份和实际验证结果见 [部署记录](deployment-status.md)。中心上线不代表 Software Vault 等业务系统已注册或完成回调联调。
