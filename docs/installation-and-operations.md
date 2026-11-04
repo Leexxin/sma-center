@@ -1,6 +1,6 @@
 # sma-center 全流程安装与运维手册
 
-适用版本：2026-10-15 的单用户 TOTP 自托管实现。变更时按[维护约定](maintenance.md)同步更新；当前部署快照见[部署核对记录](deployment-status.md)。
+适用范围：单用户 TOTP 自托管实现；2026-11-04 增补可选 SSO（尚不代表生产启用）。变更时按[维护约定](maintenance.md)同步更新；当前部署快照见[部署核对记录](deployment-status.md)。
 
 ## 1. 项目是什么
 
@@ -171,6 +171,8 @@ SMA Release 与文件服务器同步入口为侧栏“SMA 版本中心”（`/sm
 | NODE_ENV | production 或 development，开发脚本自动设置 |
 | SMA_CENTER_SELF_HOSTED | 自托管模式，由开发/构建脚本和镜像设置 |
 | SMA_CENTER_SECURE_COOKIES | true 时 Cookie 增加 Secure；HTTP 下不要启用，HTTPS 限制见第 12 节 |
+| SMA_CENTER_SSO_ISSUER | 可选固定外部 origin，启用受限 OIDC；支持 HTTP IP（本次为 http://192.168.33.124:8080）与 HTTPS，详见 [SSO 手册](sso-integration.md) |
+| SMA_CENTER_SSO_CLIENTS_FILE | 默认数据目录 oidc-clients.json；客户端注册表，变更实时读取 |
 | NEXT_TELEMETRY_DISABLED | 镜像和脚本关闭 Next 遥测 |
 | NODE_OPTIONS | 镜像构建限制 Node 堆为 1536 MiB，不等于容器总内存上限 |
 | SMA_CENTER_GITHUB_TOKEN | 可选服务端 GitHub API 凭据，仅用于版本中心元数据请求，禁止提交 Git |
@@ -183,6 +185,7 @@ SMA_CREDENTIAL_KEY 由网关从 secrets.json 注入，不能随意设置一个�
 - `secrets.json`：会话签名和凭据加密所需密钥，必须和数据一起备份。
 - `totp-auth.json`：加密 TOTP 种子、会话代次、登录时长及认证状态。
 - `setup-code.txt`：仅未绑定或重置后存在的一次性绑定授权码。
+- `oidc-clients.json`、`oidc-signing-key.pem`：启用 SSO 后的客户端注册表和签名私钥；临时 `.secret` 交付文件用后删除。卷外注册表需单独备份。
 - `release-sync.json`：版本中心的加密分享配置、核对结果及任务记录，整卷备份包含，页面 JSON 备份不包含。
 
 SQLite 启动时自动应用 `drizzle/` 中迁移；旧 atlas 数据文件/迁移记录有兼容迁移逻辑。历史内部存储标识和加密上下文不可随意改名。不要手工删用户字段、迁移记录或单独替换密钥。迁移不是自动可逆的，升级前必须备份。
@@ -345,11 +348,11 @@ docker compose exec -T sma-center cat /data/setup-code.txt
 
 ## 12. 网络、代理与安全边界
 
-当前网关按 `http://` 加请求 Host（包含端口）计算可信来源，并严格校验写请求 Origin；拒绝空、null 和跨域来源。Referrer-Policy 必须保留 same-origin，以便原生表单提供正确来源。
+未启用 SSO 时，网关仍按 `http://` 加请求 Host（含端口）计算来源，因此不能只加 HTTPS 代理并开启 Secure Cookie。启用 SSO 后，以明确配置的 `SMA_CENTER_SSO_ISSUER` 作为所有写请求的可信外部来源，HTTPS 时还必须设置 `SMA_CENTER_SECURE_COOKIES=true`；浏览器必须使用该固定来源访问，不混用地址。不会根据客户端转发头推断协议。配置、反向代理示例、应用注册与开发见 [SSO 接入手册](sso-integration.md)。该配置支持 HTTPS 来源校验，但真实代理/证书/多域名仍需部署验收，不能据此声称现有生产 HTTPS 已验证。
 
-**当前不能仅在前面加 HTTPS 代理并开启 Secure Cookie 就认为部署完成。** 浏览器发送 https Origin 时，现有网关仍计算 http Origin，会导致写请求 403。启用 HTTPS 前需实现并测试可信外部来源/代理协议配置，限制可信代理、保留正确 Host，且不能信任客户端任意伪造的转发头。本手册不提供声称已验证的 HTTPS 代理配置。
+写请求严格校验 Origin，拒绝空、null 和跨域来源。原生写表单页使用 same-origin Referrer-Policy；OIDC 外部重定向使用 no-referrer 防止授权码泄露，授权确认页单独保留 same-origin，保证原生 POST 提供有效来源。TOTP 登录 Cookie 为 SameSite=Lax、HttpOnly，HTTPS 时 Secure；绑定 Cookie 保持 Strict。
 
-现阶段仅在可信内网/VPN 使用 HTTP，限制防火墙入口，控制服务器 SSH 权限。HTTP Cookie 无传输加密，TOTP 不能防止同网段监听盗取会话。不要公开 /data、备份目录或 Docker socket；未认证 /healthz 只返回存活状态，不代表可绕过登录。
+本次直接通过内网 HTTP IP 接入 SSO，无需域名、证书或代理；设置 `SMA_CENTER_SSO_ISSUER=http://192.168.33.124:8080`、`SMA_CENTER_SECURE_COOKIES=false`。限制入口防火墙和 SSH 权限，HTTP 无传输加密。不要公开 /data、备份或 Docker socket；公开 healthz、SSO Discovery/JWKS 仅提供探测/协议元数据，不表示业务接口免认证。SSO 负责统一身份，不能替代业务系统的后端访问控制与权限管理。
 
 ## 13. 日常巡检与排障
 
@@ -402,4 +405,4 @@ SMA_CENTER_BROWSER_TEST=1 npm test
 
 发布验收：容器健康、实际入口可达、未认证被拦截、原验证器可登录、旧数据保留、资源/收藏/主题可保存、SMA 可连接、备份可读、部署源码与发布版本一致。恢复和破坏性测试只在隔离副本验证。
 
-当前未实现/未配置：多用户/多租户、密码登录、自动 Git 同步部署、定时异地备份及清理、持续监控告警、完整 HTTPS 反向代理支持。后续新增能力必须修改本节及维护约定中的相关操作说明。
+当前未实现/未配置：多用户/多租户、密码登录、自动 Git 同步部署、定时异地备份及清理、持续监控告警、生产 HTTPS 反向代理验收。后续新增能力必须修改本节及维护约定中的相关操作说明。

@@ -571,6 +571,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
         <button className="settings-button" title="SMA 版本中心与安装运维命令" onClick={() => window.location.assign('/sma/releases')}><Download /><b>SMA 版本中心</b></button>
         <div className="sidebar-tools"><button className={`settings-button ${sortingNav ? "active" : ""}`} title="菜单排序" onClick={() => setSortingNav(!sortingNav)}><ListRestart /><b>菜单排序</b></button><button className="collapse-button" title={preferences.sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-label={preferences.sidebarCollapsed ? "展开侧栏" : "收起侧栏"} onClick={() => updateSidebar({ ...preferences, sidebarCollapsed: !preferences.sidebarCollapsed })}>{preferences.sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</button></div>
         <button className="settings-button" title="主页设置" onClick={() => { setSettingsDraft(preferences); setSettingsOpen(true); }}><Settings2 /><b>主页设置</b></button>
+        <button className="settings-button" title="统一登录业务应用" onClick={() => window.location.assign('/applications')}><ShieldCheck /><b>业务应用</b></button>
         <button className="settings-button" title="安全设置与登录有效期" onClick={() => window.location.assign('/security')}><ShieldCheck /><b>安全设置</b></button>
         <div className="user-card">
           <div className="avatar">{initials}</div>
