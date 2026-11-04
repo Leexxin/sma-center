@@ -2,6 +2,8 @@
 
 本文对应本分支实现，面向中心管理员与业务系统开发者。中心已于 2026-11-04 部署并启用 HTTP IP issuer，见 [部署记录](deployment-status.md)。业务系统仍需分别注册和联调，不能以中心上线代替其验收。
 
+业务系统开发者可先阅读 [可直接转发的接入说明](sso-client-integration.md)。
+
 ## 1. 方案与边界
 
 sma-center 是统一导航入口和身份提供方（OP），业务系统是 OIDC 客户端（RP）。用户在中心完成 TOTP 登录，在 `/applications` 选择应用；应用发起授权码流程，中心显示授权确认页，用户确认后应用获得可验证的身份，创建自己的服务端会话。已有中心会话时不重复输入 TOTP，但仍需确认每次授权。
@@ -151,7 +153,7 @@ token_endpoint_auth_method: client_secret_basic
 授权请求示意（所有值用 URLSearchParams 编码）：
 
 ```text
-GET /oidc/authorize?client_id=software-vault&redirect_uri=https%3A%2F%2Forders.example.com%2Fauth%2Fcallback&response_type=code&scope=openid%20profile&state=<随机state>&nonce=<随机nonce>&code_challenge=<S256结果>&code_challenge_method=S256
+GET /oidc/authorize?client_id=software-vault&redirect_uri=http%3A%2F%2F192.168.33.81%3A8096%2Fauth%2Fcallback&response_type=code&scope=openid%20profile&state=<随机state>&nonce=<随机nonce>&code_challenge=<S256结果>&code_challenge_method=S256
 ```
 
 成功回调：`http://192.168.33.81:8096/auth/callback?code=<一次性码>&state=<原state>&iss=<编码后的issuer>`。回调地址原来带查询参数时会保留原参数，业务方不要预置 `code/state/iss/error` 等响应参数。
@@ -230,7 +232,7 @@ node examples/sso/client.mjs
 上线验收至少覆盖：
 
 1. 备份与原 TOTP、导航、资源、Agent Token 解密回归；开启 SSO 不改变既有内部主体。
-2. 使用两个独立域名业务系统，测试从中心入口和直接业务 URL 登录、无中心会话需 TOTP、有会话仍需授权确认；取消不会进入业务。
+2. 使用两个独立 IP 的业务系统，测试从中心入口和直接业务 URL 登录、无中心会话需 TOTP、有会话仍需授权确认；取消不会进入业务。
 3. 伪造回调/重复参数、错误 state/nonce、错误 issuer/aud、伪造 JWT、plain PKCE、错误 verifier、授权码重放、跨客户端兑换、过期与已删除客户端全部拒绝。
 4. 中心退出后各业务系统下次在线内省拒绝；本应用退出不会错误清除其他应用登录；中心不可达按策略拒绝，验证缓存最大延迟。
 5. 测试两个 HTTP IP 间的跨站 Cookie、固定来源、端口、NTP、日志脱敏和回调后 URL 清理；不要求域名、证书或 HTTPS。
