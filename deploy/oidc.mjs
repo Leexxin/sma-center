@@ -9,7 +9,7 @@ const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', 
 export const ssoNext = value => typeof value === 'string' && value.length <= 4096 && value.startsWith('/oidc/authorize?') && !/[\r\n]/.test(value) ? value : '/';
 function webUrl(value) {
   const url = new URL(value);
-  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) || url.username || url.password || url.hash) throw new Error('SSO URLs require HTTPS (HTTP loopback only), no credentials or fragment');
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw new Error('SSO URLs require HTTP or HTTPS, no credentials or fragment');
   return url;
 }
 export class OidcProvider {

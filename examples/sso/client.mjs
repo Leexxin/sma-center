@@ -1,5 +1,5 @@
-// Reference BFF: Node >=22.13, no additional dependencies; localhost demonstration only.
-// Production: use your framework's OIDC library, shared session store, HTTPS and access control.
+// Reference BFF: Node >=22.13, no additional dependencies; HTTP IP/localhost demonstration.
+// Production: use your framework's OIDC library, shared session store and access control.
 import { createServer } from 'node:http';
 import { randomBytes, createHash, createPublicKey, verify, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -8,7 +8,7 @@ const clientId = process.env.OIDC_CLIENT_ID || 'demo';
 const secret = readFileSync(process.env.OIDC_CLIENT_SECRET_FILE, 'utf8').trim();
 const origin = process.env.OIDC_APP_ORIGIN || 'http://localhost:4000', callback = origin + '/callback';
 const appUrl = new URL(origin);
-if (appUrl.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(appUrl.hostname) || appUrl.origin !== origin) throw new Error('Demo app supports HTTP loopback origins only');
+if (appUrl.protocol !== 'http:' || appUrl.origin !== origin || appUrl.username || appUrl.password) throw new Error('Demo app requires an HTTP origin without a path or credentials');
 const random = () => randomBytes(32).toString('base64url');
 const hash = s => createHash('sha256').update(s).digest('base64url');
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -67,9 +67,9 @@ createServer(async (req, res) => {
     // This demo has no business privileges. Map verified (issuer, sub) to local permissions here.
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>SSO 示例业务系统</title><h1>统一身份验证成功</h1><p>此页面每次访问都向中心验证令牌是否仍有效。</p><form method="post" action="/logout"><button>退出本应用</button></form><p><a href="http://localhost:3000/security">前往中心退出所有中心会话</a></p></html>');
+    res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>SSO 示例业务系统</title><h1>统一身份验证成功</h1><p>此页面每次访问都向中心验证令牌是否仍有效。</p><form method="post" action="/logout"><button>退出本应用</button></form><p>退出所有中心会话，请前往 sma-center 的安全设置。</p></html>');
   } catch {
     // Never log callback URLs, codes, tokens, secret or cookie values.
     res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('认证未完成，请重新访问 /login；中心不可用时拒绝访问。');
   }
-}).listen(Number(appUrl.port || 80), '127.0.0.1', () => console.log('SSO example: ' + origin));
+}).listen(Number(appUrl.port || 80), appUrl.hostname.replace(/^\[|\]$/g, ''), () => console.log('SSO example: ' + origin));

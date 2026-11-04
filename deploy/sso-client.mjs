@@ -13,7 +13,7 @@ if (command === 'add' && at >= 0) throw new Error('Client exists; use rotate exp
 if (command !== 'add' && at < 0) throw new Error('Client not found');
 function url(value) {
   const u = new URL(value);
-  if ((u.protocol !== 'https:' && !(u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname))) || u.username || u.password || u.hash) throw new Error('Use HTTPS (HTTP loopback only), without credentials or fragment');
+  if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.hash) throw new Error('Use HTTP or HTTPS, without credentials or fragment');
   return u;
 }
 if (command === 'add') {

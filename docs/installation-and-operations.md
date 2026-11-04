@@ -171,7 +171,7 @@ SMA Release 与文件服务器同步入口为侧栏“SMA 版本中心”（`/sm
 | NODE_ENV | production 或 development，开发脚本自动设置 |
 | SMA_CENTER_SELF_HOSTED | 自托管模式，由开发/构建脚本和镜像设置 |
 | SMA_CENTER_SECURE_COOKIES | true 时 Cookie 增加 Secure；HTTP 下不要启用，HTTPS 限制见第 12 节 |
-| SMA_CENTER_SSO_ISSUER | 可选固定外部 origin，启用受限 OIDC；生产必须 HTTPS，详见 [SSO 手册](sso-integration.md) |
+| SMA_CENTER_SSO_ISSUER | 可选固定外部 origin，启用受限 OIDC；支持 HTTP IP（本次为 http://192.168.33.124:8080）与 HTTPS，详见 [SSO 手册](sso-integration.md) |
 | SMA_CENTER_SSO_CLIENTS_FILE | 默认数据目录 oidc-clients.json；客户端注册表，变更实时读取 |
 | NEXT_TELEMETRY_DISABLED | 镜像和脚本关闭 Next 遥测 |
 | NODE_OPTIONS | 镜像构建限制 Node 堆为 1536 MiB，不等于容器总内存上限 |
@@ -352,7 +352,7 @@ docker compose exec -T sma-center cat /data/setup-code.txt
 
 写请求严格校验 Origin，拒绝空、null 和跨域来源。原生写表单页使用 same-origin Referrer-Policy；OIDC 外部重定向使用 no-referrer 防止授权码泄露，授权确认页单独保留 same-origin，保证原生 POST 提供有效来源。TOTP 登录 Cookie 为 SameSite=Lax、HttpOnly，HTTPS 时 Secure；绑定 Cookie 保持 Strict。
 
-只把中心上游端口暴露给可信代理，限制防火墙和 SSH 权限。未启用 HTTPS 的旧部署仍仅适合可信内网/VPN，HTTP 无传输加密。不要公开 /data、备份或 Docker socket；公开 healthz、SSO Discovery/JWKS 仅提供探测/协议元数据，不表示业务接口免认证。SSO 负责统一身份，不能替代业务系统的后端访问控制与权限管理。
+本次直接通过内网 HTTP IP 接入 SSO，无需域名、证书或代理；设置 `SMA_CENTER_SSO_ISSUER=http://192.168.33.124:8080`、`SMA_CENTER_SECURE_COOKIES=false`。限制入口防火墙和 SSH 权限，HTTP 无传输加密。不要公开 /data、备份或 Docker socket；公开 healthz、SSO Discovery/JWKS 仅提供探测/协议元数据，不表示业务接口免认证。SSO 负责统一身份，不能替代业务系统的后端访问控制与权限管理。
 
 ## 13. 日常巡检与排障
 
@@ -405,4 +405,4 @@ SMA_CENTER_BROWSER_TEST=1 npm test
 
 发布验收：容器健康、实际入口可达、未认证被拦截、原验证器可登录、旧数据保留、资源/收藏/主题可保存、SMA 可连接、备份可读、部署源码与发布版本一致。恢复和破坏性测试只在隔离副本验证。
 
-当前未实现/未配置：多用户/多租户、密码登录、自动 Git 同步部署、定时异地备份及清理、持续监控告警、完整 HTTPS 反向代理支持。后续新增能力必须修改本节及维护约定中的相关操作说明。
+当前未实现/未配置：多用户/多租户、密码登录、自动 Git 同步部署、定时异地备份及清理、持续监控告警、生产 HTTPS 反向代理验收。后续新增能力必须修改本节及维护约定中的相关操作说明。

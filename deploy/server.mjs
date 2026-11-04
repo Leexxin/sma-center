@@ -19,6 +19,7 @@ if (process.argv[2] === 'reset-2fa') { auth.reset(); console.log('2FA reset. Rea
 if (process.argv.length > 2) throw new Error('Only the server-side reset-2fa command is supported.');
 const ssoIssuer = process.env.SMA_CENTER_SSO_ISSUER;
 if (ssoIssuer && new URL(ssoIssuer).protocol === 'https:' && process.env.SMA_CENTER_SECURE_COOKIES !== 'true') throw new Error('HTTPS SSO requires SMA_CENTER_SECURE_COOKIES=true');
+if (ssoIssuer && new URL(ssoIssuer).protocol === 'http:' && process.env.SMA_CENTER_SECURE_COOKIES === 'true') throw new Error('HTTP SSO requires SMA_CENTER_SECURE_COOKIES=false');
 const oidc = ssoIssuer ? new OidcProvider({ directory, issuer: ssoIssuer, clientsFile: process.env.SMA_CENTER_SSO_CLIENTS_FILE || join(directory, 'oidc-clients.json'), auth }) : null;
 const app = next({ dev: process.env.NODE_ENV === 'development', ...(process.env.NODE_ENV === 'development' ? { webpack: true } : {}), hostname: '0.0.0.0', port: Number(process.env.PORT || 3000) });
 await app.prepare();

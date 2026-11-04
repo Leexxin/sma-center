@@ -12,9 +12,9 @@ async function port() {
   const server = createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const number = server.address().port; await new Promise(resolve => server.close(resolve)); return number;
 }
-test('real browser: business app → TOTP → consent → verified app session; center logout denies app', { timeout: 60000, skip: process.env.SMA_CENTER_BROWSER_TEST !== '1' }, async () => {
+test('real browser over distinct HTTP hosts: business app → TOTP → consent → verified app session; center logout denies app', { timeout: 60000, skip: process.env.SMA_CENTER_BROWSER_TEST !== '1' }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'sma-oidc-browser-')), profile = join(directory, 'chrome');
-  const centerPort = await port(), appPort = await port(), issuer = `http://127.0.0.1:${centerPort}`, origin = `http://127.0.0.1:${appPort}`;
+  const centerPort = await port(), appPort = await port(), issuer = `http://127.0.0.1:${centerPort}`, origin = `http://localhost:${appPort}`;
   const signing = 'isolated-browser-test-signing-key', auth = new TotpAuth(directory, signing, () => Date.now() - 60000);
   const enrollment = auth.authorizeSetup(readFileSync(join(directory, 'setup-code.txt'), 'utf8').trim());
   const seed = auth.pending(enrollment); assert(auth.confirmSetup(enrollment, totp(seed, Math.floor((Date.now() - 60000) / 30000))));
@@ -28,15 +28,15 @@ test('real browser: business app → TOTP → consent → verified app session; 
     child.stdout.on('data', data => logs.push(String(data))); child.stderr.on('data', data => logs.push(String(data))); return child;
   };
   async function ready(url) {
-    for (let n = 0; n < 150; n++) { try { if ((await fetch(url, { redirect: 'manual' })).status < 500) return; } catch {} await delay(100); }
-    throw new Error('Local test server failed to become ready');
+    for (let n = 0; n < 150; n++) { try { if ((await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(1000) })).status < 500) return; } catch {} await delay(100); }
+    throw new Error('Local test server failed to become ready: ' + new URL(url).origin);
   }
   try {
     start('deploy/server.mjs', { NODE_ENV: 'production', SMA_CENTER_SELF_HOSTED: '1', SMA_CENTER_DATA_DIR: directory, PORT: String(centerPort), SMA_CENTER_SSO_ISSUER: issuer, SMA_CENTER_SECURE_COOKIES: 'false' });
     await ready(issuer + '/healthz');
     start('examples/sso/client.mjs', { OIDC_ISSUER: issuer, OIDC_CLIENT_ID: 'demo', OIDC_CLIENT_SECRET_FILE: join(directory, 'client.secret'), OIDC_APP_ORIGIN: origin });
     await ready(origin);
-    const chrome = spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', ['--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run', '--no-default-browser-check', '--user-data-dir=' + profile, '--remote-debugging-port=0', 'about:blank'], { stdio: 'ignore' }); children.push(chrome);
+    const chrome = spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', ['--headless=new', '--no-proxy-server', '--disable-gpu', '--disable-background-networking', '--no-first-run', '--no-default-browser-check', '--user-data-dir=' + profile, '--remote-debugging-port=0', 'about:blank'], { stdio: 'ignore' }); children.push(chrome);
     const activePort = join(profile, 'DevToolsActivePort');
     for (let n = 0; n < 100 && !existsSync(activePort); n++) await delay(100);
     assert(existsSync(activePort), 'isolated Chrome started');
@@ -67,7 +67,7 @@ test('real browser: business app → TOTP → consent → verified app session; 
     assert(!logs.join('').includes(clientSecret), 'client secret absent from server logs');
   } finally {
     socket?.close();
-    await Promise.all(children.map(child => new Promise(resolve => { if (child.exitCode !== null || child.signalCode !== null) return resolve(); child.once('exit', resolve); child.kill('SIGTERM'); })));
+    await Promise.all(children.map(child => new Promise(resolve => { if (child.exitCode !== null || child.signalCode !== null) return resolve(); child.once('exit', resolve); child.kill('SIGTERM'); const timer = setTimeout(() => child.kill('SIGKILL'), 2000); timer.unref(); })));
     rmSync(directory, { recursive: true, force: true });
   }
 });
