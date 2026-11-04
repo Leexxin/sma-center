@@ -23,6 +23,7 @@ function fixture(t, options = {}) {
     if (url.hostname === 'raw.githubusercontent.com') return new Response(options.markdown || '# Install\n```sh\nsudo sma-ctl status\n```');
     if (url.hostname === 'github.com') {
       assert.equal(init.headers?.['X-CSRF-TOKEN'], undefined);
+      await options.onDownload?.(url.pathname.split('/').at(-1));
       return new Response(options.corruptDownload ? 'CORRUPT' : source.get(url.pathname.split('/').at(-1)));
     }
     if (url.href.startsWith(base + '/dirs')) {
@@ -49,13 +50,16 @@ function fixture(t, options = {}) {
       const name = decodeURIComponent(url.pathname.slice((new URL(base).pathname + '/%2F').length)).replace(/^\//, '');
       assert.equal(url.searchParams.get('mkdir_parents'), 'true');
       assert.ok(name.startsWith(release.tag_name + '/'), 'uploads must stay inside the selected version');
+      const chunks = []; for await (const chunk of init.body) chunks.push(Buffer.from(chunk));
+      const uploaded = Buffer.concat(chunks);
       writes.push(name);
-      if (options.partialUpload && name.endsWith('/sma.deb')) { folders.add(release.tag_name); mirror.set(name, Buffer.from(init.body).subarray(0, 3)); return new Response('connection interrupted', { status: 500 }); }
+      if (options.partialUpload && name.endsWith('/sma.deb')) { folders.add(release.tag_name); mirror.set(name, uploaded.subarray(0, 3)); return new Response('connection interrupted', { status: 500 }); }
       if (options.failPackage && name.endsWith('/sma.deb')) return new Response('fail', { status: 500 });
       folders.add(release.tag_name);
-      mirror.set(name, Buffer.from(init.body)); return new Response('ok', { status: 201 });
+      mirror.set(name, uploaded); return new Response('ok', { status: 201 });
     }
     if (url.pathname.endsWith('/browse')) {
+      options.reads?.push(url.searchParams.get('path'));
       const name = url.searchParams.get('path').slice(1);
       return new Response(mirror.get(name));
     }
@@ -222,4 +226,123 @@ test('an interrupted partial upload becomes a conflict and is only repaired with
   service.start('sync', 'v1.0.0'); await service.pending; assert.equal(writes.length, 1);
   service.start('sync', 'v1.0.0', true); await service.pending;
   assert.equal(service.status().job.status, 'completed'); assert.equal(mirror.get('v1.0.0/sma.deb').toString(), 'package');
+});
+
+test('byte progress updates within a chunked download and survives restart as interrupted', async t => {
+  const { service, release, directory, fetcher } = fixture(t);
+  await compare(service);
+  const asset = service.state.comparison.assets[0];
+  let sent = 0;
+  service.fetcher = async (url, init) => {
+    if (new URL(url).hostname !== 'github.com') return fetcher(url, init);
+    return new Response(new ReadableStream({ pull(controller) {
+      if (sent === 7) { controller.close(); return; }
+      controller.enqueue(Buffer.from('package').subarray(sent, ++sent));
+    } }));
+  };
+  service.state.job.status = 'running';
+  let updates = 0;
+  const original = service.transfer.bind(service);
+  service.transfer = (...args) => {
+    const report = original(...args);
+    return (bytes, finished) => { report(bytes, finished); if (args[1] === 'download' && !finished) updates++; };
+  };
+  await service.download(asset);
+  assert.ok(updates > 1);
+  const file = service.status().job.files.find(item => item.name === asset.name);
+  assert.equal(file.sourceVerified, true);
+  assert.equal(file.stages.download.bytes, 7);
+  assert.ok(file.stages.download.elapsedMs >= 0);
+  const restarted = new ReleaseSyncService(directory, { secret: 'test-only-secret', fetcher });
+  assert.equal(restarted.status().job.status, 'interrupted');
+  assert.equal(restarted.status().job.files[0].sourceVerified, true);
+  assert.equal(release.assets.length, 3);
+});
+
+test('stalled transfers show zero speed without changing job completion', t => {
+  const { service } = fixture(t);
+  service.state.job = { status: 'running', files: [{ name: 'slow', stage: 'download', lastProgressAt: Date.now() - 16000, rate: 100 }] };
+  const job = service.status().job;
+  assert.equal(job.files[0].stalled, true); assert.equal(job.files[0].rate, 0);
+  assert.equal(job.status, 'running');
+});
+
+test('one new file is read back once; an aligned file is only read once per subsequent sync', async t => {
+  const reads = []; const { service, release } = fixture(t, { reads });
+  release.assets = release.assets.slice(0, 1);
+  await compare(service);
+  service.start('sync', 'v1.0.0'); await service.pending;
+  assert.equal(service.status().job.status, 'completed'); assert.equal(reads.length, 1);
+  const file = service.status().job.files[0];
+  assert.equal(file.sourceVerified, true); assert.equal(file.targetVerified, true);
+  assert.equal(file.stages.upload.bytes, release.assets[0].size);
+  reads.length = 0;
+  service.start('sync', 'v1.0.0'); await service.pending;
+  assert.equal(service.status().job.status, 'completed'); assert.equal(reads.length, 1);
+});
+
+test('ordinary assets overlap with a maximum of two workers and metadata publishes afterwards', async t => {
+  let active = 0, maximum = 0;
+  const { service, release, source, writes } = fixture(t, { onDownload: async name => {
+    if (!name.endsWith('.deb')) { assert.equal(active, 0); return; }
+    maximum = Math.max(maximum, ++active);
+    await new Promise(resolve => setTimeout(resolve, 20)); active--;
+  } });
+  for (const name of ['other.deb', 'third.deb', 'fourth.deb']) {
+    source.set(name, Buffer.from(name));
+    release.assets.push({ name, size: name.length, digest: 'sha256:' + digest(Buffer.from(name)), browser_download_url: `https://github.com/${REPOSITORY}/releases/download/v1.0.0/${name}` });
+  }
+  await compare(service); service.start('sync', 'v1.0.0'); await service.pending;
+  assert.equal(service.status().job.status, 'completed'); assert.equal(maximum, 2);
+  assert.deepEqual(writes.slice(-2), ['v1.0.0/checksums.txt', 'v1.0.0/latest.txt']);
+});
+
+test('a parallel failure drains active workers and cannot publish checksums or latest', async t => {
+  const { service, release, source, mirror, folders, writes } = fixture(t, { failPackage: true, onDownload: () => new Promise(resolve => setTimeout(resolve, 10)) });
+  folders.add('v1.0.0'); mirror.set('v1.0.0/unrelated', Buffer.from('keep'));
+  source.set('second.deb', Buffer.from('second'));
+  release.assets.push({ name: 'second.deb', size: 6, digest: 'sha256:' + digest(Buffer.from('second')), browser_download_url: `https://github.com/${REPOSITORY}/releases/download/v1.0.0/second.deb` });
+  await compare(service); service.start('sync', 'v1.0.0'); await service.pending;
+  assert.equal(service.status().job.status, 'failed'); assert.equal(service.running, false);
+  assert.ok(!writes.some(name => /checksums|latest/.test(name)));
+  const count = writes.length; await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(writes.length, count);
+});
+
+test('native HTTP streaming upload preserves raw body, length and readback verification', async t => {
+  const { createServer } = await import('node:http');
+  const { service, release, source, mirror, folders, fetcher } = fixture(t);
+  const bytes = Buffer.alloc(256 * 1024, 42); source.set('sma.deb', bytes);
+  release.assets = [ { ...release.assets[0], size: bytes.length, digest: 'sha256:' + digest(bytes) } ];
+  let received = 0;
+  const server = createServer(async (req, res) => {
+    assert.equal(req.headers['content-length'], String(bytes.length));
+    assert.equal(req.headers['content-type'], 'application/octet-stream');
+    const chunks = []; for await (const chunk of req) { received += chunk.length; chunks.push(chunk); }
+    mirror.set('v1.0.0/sma.deb', Buffer.concat(chunks)); folders.add('v1.0.0');
+    res.writeHead(201); res.end('ok');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  service.fetcher = (url, init) => init?.method === 'POST' ? fetch(`http://127.0.0.1:${server.address().port}/`, init) : fetcher(url, init);
+  await compare(service); service.start('sync', 'v1.0.0'); await service.pending;
+  assert.equal(service.status().job.status, 'completed'); assert.equal(received, bytes.length);
+  assert.equal(service.status().job.files[0].targetVerified, true);
+});
+
+test('final listing still rejects removed or size-changed verified files', async t => {
+  for (const removed of [true, false]) {
+    const { service, release, mirror } = fixture(t);
+    release.assets = release.assets.slice(0, 1);
+    await compare(service);
+    const compareImpl = service.compare.bind(service);
+    service.compare = (current, verified) => {
+      if (verified?.size) {
+        if (removed) mirror.delete('v1.0.0/sma.deb'); else mirror.set('v1.0.0/sma.deb', Buffer.from('bad'));
+      }
+      return compareImpl(current, verified);
+    };
+    service.start('sync', 'v1.0.0'); await service.pending;
+    assert.equal(service.status().job.status, 'failed');
+    assert.ok(service.status().comparison.assets.some(a => a.status !== 'aligned'));
+  }
 });

@@ -10,17 +10,53 @@ import { toast } from 'sonner';
 
 type Asset = { name: string; size: number; digest: string | null; url: string; status?: string };
 type Release = { tag: string; name: string; prerelease: boolean; publishedAt: string; url: string; body: string; assets: Asset[] };
-type Job = { id: string; tag: string; kind: string; layout?: string; status: string; message: string; done: number; total: number; startedAt: string };
+type TransferFile = { name: string; stage: string; failedStage?: string; bytes: number; total: number; rate: number; stalled: boolean; idleMs: number; sourceVerified?: boolean; targetVerified?: boolean; stages: Record<string, { elapsedMs?: number }> };
+type Job = { id: string; tag: string; kind: string; layout?: string; status: string; message: string; done: number; total: number; startedAt: string; files?: TransferFile[]; idleMs?: number };
 type State = { configured: boolean; targetOrigin: string | null; releases: Release[]; comparison: null | { id: string; tag: string; directory: string; folderExists: boolean; checkedAt: string; assets: Asset[]; extras: number }; job: Job | null; history: Job[] };
 type Commands = { tag: string; platform: string; documents: { path: string; source: string; error: string | null; groups: { title: string; language: string; command: string; dangerous: boolean }[] }[] };
 const labels: Record<string, string> = { missing: '缺失', aligned: 'SHA-256 一致', conflict: '内容冲突', unverified: '缺少摘要' };
 const size = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 async function request<T = State>(body?: object): Promise<T> {
-  const response = await fetch('/api/sma/releases', body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' });
+  const response = await fetch('/api/sma/releases', body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(70000) } : { cache: 'no-store', signal: AbortSignal.timeout(10000) });
   const result = await response.json();
   if (!response.ok) throw new Error((result as { error?: string })?.error || '操作失败');
   return result as T;
+}
+
+const stages: Record<string, string> = { compare: '核对镜像', download: '下载', verify: '校验源文件', upload: '上传', readback: '回读校验', completed: '已完成', failed: '失败', interrupted: '已停止' };
+function JobProgress({ job, receivedAt }: { job: Job; receivedAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (job.status !== 'running') return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [job.status]);
+  const stale = job.status === 'running' && now - receivedAt > 10000;
+  return <section className={`release-job ${job.status}`} aria-label="版本同步任务">
+    <div role="status" aria-live="polite"><strong>{job.tag} · {job.kind === 'sync' ? '同步' : '核对'}</strong><span>{({ running: '执行中', failed: '失败', completed: '已完成', interrupted: '已中断' } as Record<string, string>)[job.status]}</span></div>
+    <p>{job.message}</p>
+    <progress max={Math.max(job.total, 1)} value={job.done} aria-label="当前阶段文件完成数" />
+    <small>{job.done} / {job.total} · 当前阶段文件完成数，可继续浏览其他版本与文档</small>
+    {stale && <p role="status" className="release-transfer-warning">超过 10 秒未收到状态更新，正在重连；这不表示任务已停止。</p>}
+    {!stale && job.status === 'running' && (job.idleMs || 0) + Math.max(0, now - receivedAt) >= 15000 && !job.files?.some(file => !['completed', 'failed', 'interrupted'].includes(file.stage)) && <p className="release-transfer-warning" role="status">正在等待远端元数据或上传会话响应，超过 15 秒无阶段进展。</p>}
+    {job.files?.map(file => {
+      const active = job.status === 'running' && !['completed', 'failed', 'interrupted'].includes(file.stage);
+      const idle = file.idleMs + Math.max(0, now - receivedAt);
+      const stalled = active && idle >= 15000;
+      const rate = active && !stale && idle < 3000 ? file.rate : 0;
+      const duration = Object.values(file.stages).reduce((sum, stage) => sum + (stage.elapsedMs || 0), 0);
+      return <div className="release-transfer" key={file.name}>
+        <div><strong>{file.name}</strong><span>{stages[file.stage] || file.stage}{file.failedStage && ` · ${stages[file.failedStage] || file.failedStage}`}</span></div>
+        <progress max={Math.max(file.total, 1)} value={file.bytes} aria-label={`${file.name} ${stages[file.stage] || file.stage}字节进度`} />
+        <div className="release-transfer-metrics"><span>{size(file.bytes)} / {size(file.total)}</span><span>{active ? `${size(rate)} / s` : `累计阶段耗时 ${(duration / 1000).toFixed(1)} 秒`}</span></div>
+        <p>源 SHA-256：{file.sourceVerified ? '通过' : file.failedStage === 'verify' ? '失败' : '尚未通过'} · 镜像 SHA-256：{file.targetVerified ? '通过' : file.failedStage === 'readback' ? '未通过' : '尚未通过'}</p>
+        {file.stage === 'upload' && <small>已交给 HTTP 客户端的字节；仍需服务器确认与回读校验。</small>}
+        {stalled && !stale && <p className="release-transfer-warning" role="status">已 {Math.floor(idle / 1000)} 秒无字节进展，正在等待网络或服务器响应。</p>}
+        <details><summary>各阶段耗时</summary><p>{Object.entries(file.stages).map(([name, stage]) => `${stages[name] || name}：${stage.elapsedMs === undefined ? '进行中或未完成' : `${(stage.elapsedMs / 1000).toFixed(2)} 秒`}`).join(' · ')}</p></details>
+      </div>;
+    })}
+  </section>;
 }
 
 function CommandBlock({ command }: { command: string }) {
@@ -50,6 +86,7 @@ export default function ReleaseCenter({ theme, accent }: { theme: string; accent
   const [share, setShare] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [receivedAt, setReceivedAt] = useState(() => Date.now());
   const [overwrite, setOverwrite] = useState(false);
   const [tab, setTab] = useState<'files' | 'commands'>('files');
   const [platform, setPlatform] = useState('linux');
@@ -57,16 +94,19 @@ export default function ReleaseCenter({ theme, accent }: { theme: string; accent
   const [commandsBusy, setCommandsBusy] = useState(false);
   const [commandsError, setCommandsError] = useState('');
   const load = useCallback(async () => {
-    try { const next = await request() as State; setState(next); setError(''); }
+    try { const next = await request() as State; setState(next); setReceivedAt(Date.now()); setError(''); }
     catch (err) { setError(err instanceof Error ? err.message : '读取失败'); }
   }, []);
-  useEffect(() => { let active = true; request().then(next => { if (active) { setState(next); setTag(next.releases.find(item => !item.prerelease)?.tag || next.releases[0]?.tag || ''); } }).catch(err => { if (active) setError(err.message); }); return () => { active = false; }; }, []);
+  useEffect(() => { let active = true; request().then(next => { if (active) { setState(next); setReceivedAt(Date.now()); setTag(next.releases.find(item => !item.prerelease)?.tag || next.releases[0]?.tag || ''); } }).catch(err => { if (active) setError(err.message); }); return () => { active = false; }; }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; document.documentElement.style.colorScheme = theme; }, [theme]);
   const running = state?.job?.status === 'running';
   useEffect(() => {
     if (!running) return;
-    const timer = window.setInterval(() => void load(), 1500);
-    return () => window.clearInterval(timer);
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => { await load(); if (active) timer = setTimeout(poll, 1000); };
+    timer = setTimeout(poll, 1000);
+    return () => { active = false; clearTimeout(timer); };
   }, [running, load]);
   useEffect(() => {
     if (!tag || tab !== 'commands') return;
@@ -78,7 +118,7 @@ export default function ReleaseCenter({ theme, accent }: { theme: string; accent
     setBusy(true); setError('');
     try {
       const next = await request({ action, tag, ...(action === 'configure' ? { shareUrl: share } : {}), allowOverwrite: overwrite }) as State;
-      setState(next);
+      setState(next); setReceivedAt(Date.now());
       if (action === 'configure') { setShare(''); setOverwrite(false); toast.success('分享地址已加密保存'); }
       if (action === 'refresh' && !next.releases.some(item => item.tag === tag)) setTag(next.releases.find(item => !item.prerelease)?.tag || next.releases[0]?.tag || '');
     } catch (err) { setError(err instanceof Error ? err.message : '操作失败'); }
@@ -102,8 +142,9 @@ export default function ReleaseCenter({ theme, accent }: { theme: string; accent
         <div><Download /><span><small>内网镜像 · SFTPGo</small><strong>{state?.targetOrigin || '尚未配置本地文件仓库'}</strong></span><b>{state?.configured ? '已保存' : '待配置'}</b></div>
       </section>
       <details className="release-config" open={!state?.configured}><summary>配置本地分享地址</summary><p>填写 SFTPGo 的 upload 分享页。需要同时具备列举、下载和上传权限；地址加密保存，不会写入 Git 或页面 JSON 备份。</p><div><Input aria-label="SFTPGo 分享地址" type="url" value={share} onChange={event => setShare(event.target.value)} placeholder="http://文件服务器:8080/web/client/pubshares/分享标识/upload" disabled={disabled} /><Button onClick={() => act('configure')} disabled={disabled || !share.trim()}>保存配置</Button></div></details>
+      {state?.job && <JobProgress job={state.job} receivedAt={receivedAt} />}
       <div className="release-workspace">
-        <aside className="release-versions"><div className="release-panel-title"><Package /><h2>发布版本</h2><span>{state?.releases.length || 0}</span></div><p>包含稳定版和预览版</p>{!state?.releases.length && <div className="release-empty">点击右上角“刷新 GitHub”<br />获取实际发布版本</div>}{state?.releases.map(item => <button key={item.tag} className={tag === item.tag ? 'selected' : ''} aria-pressed={tag === item.tag} disabled={disabled} onClick={() => { setTag(item.tag); setOverwrite(false); setCommands(null); setCommandsError(''); setCommandsBusy(tab === 'commands'); }}><span><strong>{item.tag}</strong><small>{item.prerelease ? '预览版' : '稳定版'} · {item.assets.length} 个附件</small></span><small>{new Date(item.publishedAt).toLocaleDateString('zh-CN')}</small></button>)}</aside>
+        <aside className="release-versions"><div className="release-panel-title"><Package /><h2>发布版本</h2><span>{state?.releases.length || 0}</span></div><p>包含稳定版和预览版</p>{!state?.releases.length && <div className="release-empty">点击右上角“刷新 GitHub”<br />获取实际发布版本</div>}{state?.releases.map(item => <button key={item.tag} className={tag === item.tag ? 'selected' : ''} aria-pressed={tag === item.tag} onClick={() => { setTag(item.tag); setOverwrite(false); setCommands(null); setCommandsError(''); setCommandsBusy(tab === 'commands'); }}><span><strong>{item.tag}</strong><small>{item.prerelease ? '预览版' : '稳定版'} · {item.assets.length} 个附件</small></span><small>{new Date(item.publishedAt).toLocaleDateString('zh-CN')}</small></button>)}</aside>
         <section className="release-content">
           {!release ? <div className="release-welcome"><Package /><h2>选择一个发布版本</h2><p>核对真实文件内容，再决定是否同步。不会自动安装或执行任何脚本。</p></div> : <>
             <div className="release-version-heading"><div><span className="release-tag">{release.prerelease ? 'PRE-RELEASE' : 'STABLE RELEASE'}</span><h2>{release.name}</h2><a href={release.url} target="_blank" rel="noreferrer">查看 GitHub 发布说明<ArrowUpRight /></a></div><span>{size(release.assets.reduce((sum, asset) => sum + asset.size, 0))}<small>{release.assets.length} 个附件</small></span></div>
@@ -113,7 +154,7 @@ export default function ReleaseCenter({ theme, accent }: { theme: string; accent
               <div className="release-actions"><Button variant="outline" onClick={() => act('compare')} disabled={disabled || !state?.configured}><ShieldCheck />核对两边仓库</Button><Button onClick={() => act('sync')} disabled={disabled || !comparison || !assets.length || assets.some(asset => asset.status === 'unverified') || (conflicts > 0 && !overwrite)}><Download />同步所选版本</Button></div>
               <p className="release-help">目标版本目录：<strong>/{tag}/</strong>。仅在此目录内进行 SHA-256 比对和上传，不写入根目录、不影响其他版本。{comparison && !comparison.folderExists && '该版本目录尚不存在，同步时会自动创建。'}</p>
               {comparison && <label className="release-overwrite"><input type="checkbox" checked={overwrite} disabled={disabled} onChange={event => setOverwrite(event.target.checked)} /><span>允许替换 /{tag}/ 内的冲突文件，包括此版本的脚本、校验清单及索引。<small>不会覆盖其他版本目录。单版本内仍不是原子发布，请避免同时手动上传。</small></span></label>}
-              {state?.job && <div className={`release-job ${state.job.status}`} role="status" aria-live="polite"><div><strong>{state.job.tag} · {state.job.kind === 'sync' ? '同步' : '核对'}</strong><span>{({ running: '执行中', failed: '失败', completed: '已完成', interrupted: '已中断' } as Record<string, string>)[state.job.status]}</span></div><p>{state.job.message}</p><progress max={Math.max(state.job.total, 1)} value={state.job.done} aria-label="当前阶段文件进度" /><small>{state.job.done} / {state.job.total} · 阶段进度，不代表整体字节百分比</small></div>}
+
               <div className="release-table-wrap"><table><thead><tr><th>发布附件</th><th>大小</th><th>本地状态</th></tr></thead><tbody>{assets.map(asset => <tr key={asset.name}><td><a href={asset.url} target="_blank" rel="noreferrer">{asset.name}<ArrowUpRight /></a><small title={asset.digest || '缺少可信 SHA-256'}>{asset.digest ? `SHA-256 ${asset.digest.slice(0, 16)}…` : '未提供 SHA-256'}</small></td><td>{size(asset.size)}</td><td><span className={`release-file-state ${asset.status || ''}`}>{labels[asset.status || ''] || '尚未核对'}</span></td></tr>)}</tbody></table></div>
               {comparison && <p className="release-help">核对时间：{new Date(comparison.checkedAt).toLocaleString('zh-CN')}。{comparison.directory}/ 内额外 {comparison.extras} 个项目保持不变。同步前会重新核对。</p>}
               <details className="release-notes"><summary>发布说明</summary><pre>{release.body || '此版本未提供说明。'}</pre></details>
