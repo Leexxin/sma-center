@@ -2,6 +2,19 @@
 
 最近核对日期：2026-11-04（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
 
+## 2026-11-04 PR #5 版本同步优化上线（当前部署）
+
+- [PR #5](https://github.com/Leexxin/sma-center/pull/5) 已合并，生产业务源码为 `4d888f67545c082303fad4fd49c899de107bd1e6`。运行镜像 `sha256:a9831a90b3ce0cf50040c36a31f8107a3a6b6d4b3204bb89ddd00584f7ef55bf`，另标记 `sma-center:4d888f67545c`，容器 running/healthy。
+- 按原 `/opt/sma-center/compose.yaml` 和 `compose.override.yaml` 构建并切换，端口 `192.168.33.124:8080`、外部数据卷 `sma-center-data` 和两个 Compose 文件摘要均保持不变。没有调整网关/网络、重置 TOTP、轮换 Token、修改 SSO 客户端或执行 Agent 安装。
+- 备份前同步任务为 Windows v0.3.0-rc.1 completed；切换前再次确认没有运行中的任务。完整卷备份 `/root/sma-center-backups/sma-center-20261104-143756.tar.gz`，SHA-256 `ad8645b213456fe2e7aa5f691fc00123770492b74a3ae81fe7109fd1e4c7c739`；源码快照 `/root/sma-center-backups/source-before-pr5-4d888f67545c.tar.gz`，SHA-256 `66ce8b959bdb64bfcad1612731181e3b4e39721e93cec105bfa98c5823f1592c`。归档均检查可读，旧镜像保留为 `sma-center:before-pr5-4d888f67545c`。文件名使用服务器 UTC。
+- 上线前后资源 12 条、用户偏好 1 条、用户记录 1 条、Agent 凭据 8 条，四张表的全部行内容摘要一致；8 条凭据均能成功解密。`secrets.json`、`totp-auth.json`、OIDC 签名私钥及客户端表字节摘要一致，TOTP 仍绑定；没有输出真实密钥、Token 或 Cookie。
+- 同步状态文件在部署期间因随后执行的 v0.2.9、v0.2.8 只读核对产生正常变化，仅 comparison/job/history 改变；加密分享地址和 Release 列表保留，没有恢复旧状态覆盖新任务。新版服务实际完成 v0.2.9 核对，产生 14 个逐文件字节/耗时记录，全部镜像 SHA-256 通过；其余 6 个合集/摘要文件确实不在镜像目录，见[版本中心缺失附件说明](sma-release-center.md#验证与排障)。核对 completed 表示核对操作结束，不表示附件已全部同步。
+- 生产构建与 TypeScript 检查通过。上线时对合并提交的全部 172 个 Git 跟踪文件逐项核对，服务器源码和运行容器均一致；此后部署记录为独立文档提交，不改变上述业务镜像快照。
+- `/healthz` 为 200/ok；未认证版本 API 和资源 API 均为 401，版本页面为 303 至登录；SSO Discovery 为原 HTTP IP issuer，JWKS 为单个公钥且无私钥字段。已有浏览器会话可访问新版版本中心，独立任务区域可见。没有代替用户重新登录、绑定验证器或确认 SSO 授权。
+- 本地此前 70/70 测试（含三组隔离 Chrome）、lint、生产构建通过；生产实际核对与凭据保留已验收。新版完整 GitHub 下载→正式附件上传→回读的生产页面联动未在本次部署中主动执行；上传兼容性在部署前已用临时状态/随机文件在同一容器环境验证并清理。没有自动补齐历史版本缺失文件，也未做生产断网、覆盖冲突或回滚演练。
+- 本次没有数据库迁移或加密格式变更。需回退时使用保留的准确旧镜像及源码快照，沿用相同 Compose 配置和数据卷；先确认没有运行中同步任务，不删除或恢复空数据卷。回退只表示恢复旧同步体验，不能自动撤销用户后续已完成的附件同步。
+
+
 ## 2026-11-04 Software Vault 客户端接入补充
 
 - 复用已上线的 HTTP IP SSO 中心，本次未重新构建、重启中心或更改其 Compose 覆盖文件、TOTP、外部数据卷、主密钥与签名私钥。
@@ -10,7 +23,7 @@
 - Vault 业务镜像为 `software-vault:59b54c0`，容器 healthy；其固定 issuer 为 `http://192.168.33.124:8080`，双方 Secure Cookie=false。真实 Discovery/JWKS、客户端认证、S256 授权跳转、无会话业务拒绝与伪造回调拒绝通过；Vault 原业务记录与加密密钥保留。
 - 尚未使用真实 TOTP 完成生产浏览器授权与回调验收，没有替用户确认授权或绕过中心认证；此补充不更改上节中心上线时“空客户端表”的历史快照。
 
-## 2026-11-04 HTTP IP SSO 上线（当前部署）
+## 2026-11-04 HTTP IP SSO 上线（历史部署）
 
 - 功能提交 `275b791`、HTTP IP 修正 `049016b`，经 [PR #1](https://github.com/Leexxin/sma-center/pull/1) 合并至 main；本次生产业务源码为合并提交 `0bf65bd9b17d3684a53da8050a52ab2716f9525c`。本节为后续部署记录，不改变业务镜像。
 - 生产地址仍为 `http://192.168.33.124:8080`，不要求 HTTPS、域名或证书。明确配置的 `SMA_CENTER_SSO_ISSUER` 与此地址相同，`SMA_CENTER_SECURE_COOKIES=false`，客户端表路径 `/data/oidc-clients.json`。

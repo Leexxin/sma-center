@@ -114,6 +114,16 @@ GitHub `Leexxin/server-monitor-agent` 的已发布 Release 是权威源，SFTPGo
 
 执行 `npm test`、`npm run lint`、`npm run build`。生产构建后设置 `SMA_CENTER_BROWSER_TEST=1` 运行 `tests/release-center-browser.test.mjs`，用隔离 TOTP、模拟版本 API 和独立 Chrome 验证同步中浏览版本/文档、字节变化、断线提示及手机宽度，不读取生产认证或分享配置。`tests/release-sync.test.mjs` 使用隔离模拟服务测试摘要、冲突确认、重试幂等、字节进度、停滞提示、两路并发上限与阶段屏障、减少重复回读、失败等待在途任务、加密和任务持久化；不会写入生产文件服务器。
 
+### 固定缺少六个合集与摘要文件
+
+2026-11-04 核对 v0.2.8、v0.2.9：GitHub 各有 20 个附件，目标目录各有 14 个文件，缺的恰为 `sma_版本_docs.tar.gz`、`sma_版本_gofpt_share.tar.gz`、`sma_版本_linux_packages.tar.gz` 及各自的 `.sha256`。这是真实文件缺失，不是 SHA-256 失败或前端误判。
+
+上游 `scripts/prepare-share.sh` 将 `dist/packages` 的安装包与脚本放入版本目录；三个合集及其摘要由发布工作流另外在 `dist/` 生成并作为 GitHub Release assets 发布，不属于展开的分享目录。因此以该分享目录交付范围填充的镜像，会缺这六项；当前实机清单与该范围吻合，不能仅凭现有文件清单还原每个历史版本的实际上传操作。
+
+现有单独安装包及其校验清单仍可使用。版本中心的目标是对齐全部 GitHub 附件，所以仍将这些合集标记为缺失，不能将“核对任务已完成”理解成“所有附件已一致”。要得到完整镜像，需选择对应版本执行同步补齐；同步安装包不会自动把版本中心程序或 Agent 安装/升级。仅询问原因或部署中心程序不代表自动同步全部历史 Release，本次没有补齐这些正式附件。
+
+### 其他故障
+
 - 无法列举：检查分享是否过期、是否只上传、是否需要密码，以及容器网络。
 - 无法获取上传令牌/403：检查分享读写权限、SFTPGo 页面协议是否变化、反向代理/会话限制；不通过禁用 CSRF 修复。
 - GitHub 403/429：检查限流及 Token 权限；不要持续刷新。
