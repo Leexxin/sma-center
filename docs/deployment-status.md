@@ -2,6 +2,14 @@
 
 最近核对日期：2026-11-04（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
 
+## 2026-11-04 Software Vault 客户端接入补充
+
+- 复用已上线的 HTTP IP SSO 中心，本次未重新构建、重启中心或更改其 Compose 覆盖文件、TOTP、外部数据卷、主密钥与签名私钥。
+- 注册 `software-vault`（Software Vault），入口 `http://192.168.33.81:8096/login`，精确回调 `http://192.168.33.81:8096/auth/callback`。原空客户端表备份为 `/data/oidc-clients.before-software-vault.json`；注册表热加载生效。
+- 密钥经 SSH 管道交付到 Vault 的 UID/GID 10001 受限文件；真实后端 Basic 认证内省探针通过后，已删除本次中心的一次性交付密钥。未输出任何密钥、Cookie、授权码或 TOTP。
+- Vault 业务镜像为 `software-vault:59b54c0`，容器 healthy；其固定 issuer 为 `http://192.168.33.124:8080`，双方 Secure Cookie=false。真实 Discovery/JWKS、客户端认证、S256 授权跳转、无会话业务拒绝与伪造回调拒绝通过；Vault 原业务记录与加密密钥保留。
+- 尚未使用真实 TOTP 完成生产浏览器授权与回调验收，没有替用户确认授权或绕过中心认证；此补充不更改上节中心上线时“空客户端表”的历史快照。
+
 ## 2026-11-04 HTTP IP SSO 上线（当前部署）
 
 - 功能提交 `275b791`、HTTP IP 修正 `049016b`，经 [PR #1](https://github.com/Leexxin/sma-center/pull/1) 合并至 main；本次生产业务源码为合并提交 `0bf65bd9b17d3684a53da8050a52ab2716f9525c`。本节为后续部署记录，不改变业务镜像。
