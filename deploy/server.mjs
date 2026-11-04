@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { OidcProvider, ssoNext } from './oidc.mjs';
 import { TotpAuth } from './totp-auth.mjs';
 import { REFERRER_POLICY, validWriteOrigin } from './request-origin.mjs';
 import { setupPage, enrollPage, loginPage, securityPage } from './auth-pages.mjs';
@@ -16,6 +17,9 @@ process.env.SMA_CREDENTIAL_KEY = secrets.credential;
 const auth = new TotpAuth(directory, secrets.session);
 if (process.argv[2] === 'reset-2fa') { auth.reset(); console.log('2FA reset. Read /data/setup-code.txt to bind again.'); process.exit(0); }
 if (process.argv.length > 2) throw new Error('Only the server-side reset-2fa command is supported.');
+const ssoIssuer = process.env.SMA_CENTER_SSO_ISSUER;
+if (ssoIssuer && new URL(ssoIssuer).protocol === 'https:' && process.env.SMA_CENTER_SECURE_COOKIES !== 'true') throw new Error('HTTPS SSO requires SMA_CENTER_SECURE_COOKIES=true');
+const oidc = ssoIssuer ? new OidcProvider({ directory, issuer: ssoIssuer, clientsFile: process.env.SMA_CENTER_SSO_CLIENTS_FILE || join(directory, 'oidc-clients.json'), auth }) : null;
 const app = next({ dev: process.env.NODE_ENV === 'development', ...(process.env.NODE_ENV === 'development' ? { webpack: true } : {}), hostname: '0.0.0.0', port: Number(process.env.PORT || 3000) });
 await app.prepare();
 const handle = app.getRequestHandler(), cookieName = 'sma_center_totp', enrollmentCookie = 'sma_center_enrollment';
@@ -27,9 +31,9 @@ createServer(async (request, response) => {
     response.setHeader('Referrer-Policy', REFERRER_POLICY); response.setHeader('Cache-Control', 'no-store');
     for (const name of Object.keys(request.headers)) if (name.startsWith('oai-authenticated-user-') || name.startsWith('sma-center-')) delete request.headers[name];
     const cookies = new Map((request.headers.cookie || '').split(';').map(x => { const at = x.indexOf('='); return [x.slice(0, at).trim(), x.slice(at + 1)]; }));
-    const cookie = (name, value, age, path = '/') => `${name}=${value}; Path=${path}; HttpOnly; SameSite=Strict; Max-Age=${age}${process.env.SMA_CENTER_SECURE_COOKIES === 'true' ? '; Secure' : ''}`;
+    const cookie = (name, value, age, path = '/') => `${name}=${value}; Path=${path}; HttpOnly; SameSite=${name === cookieName ? 'Lax' : 'Strict'}; Max-Age=${age}${process.env.SMA_CENTER_SECURE_COOKIES === 'true' ? '; Secure' : ''}`;
     const reply = (status, body, type = 'text/html; charset=utf-8') => { response.writeHead(status, { 'Content-Type': type }); response.end(body); };
-    const html = (status, body) => { response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"); reply(status, body); };
+    const html = (status, body, formAction = "'self'") => { response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`); reply(status, body); };
     const redirect = path => { response.writeHead(303, { Location: path }); response.end(); };
     const issue = token => response.setHeader('Set-Cookie', cookie(cookieName, token, auth.state.ttlSeconds));
     const form = async () => {
@@ -40,7 +44,10 @@ createServer(async (request, response) => {
     };
     if (url.pathname === '/healthz' && request.method === 'GET') { reply(200, 'ok', 'text/plain'); return; }
     if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(request.method)) { reply(405, 'Method not allowed'); return; }
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !validWriteOrigin(request.headers, url.origin)) { reply(403, '表单来源验证失败，请重新打开当前页面后再提交。'); return; }
+    const session = auth.session(cookies.get(cookieName));
+    const validOrigin = validWriteOrigin(request.headers, oidc?.issuer || url.origin);
+    if (oidc && await oidc.handle(request, response, url, session, { form, html, redirect, reply, validOrigin })) return;
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !validOrigin) { reply(403, '表单来源验证失败，请重新打开当前页面后再提交。'); return; }
     if (url.pathname === '/atlas-login' || url.pathname === '/signin-with-chatgpt') { redirect('/login'); return; }
     if (url.pathname === '/favicon.svg') { reply(200, readFileSync(join(process.cwd(), 'public/favicon.svg')), 'image/svg+xml'); return; }
     if (url.pathname.startsWith('/setup')) {
@@ -68,14 +75,14 @@ createServer(async (request, response) => {
     }
     if (url.pathname === '/login') {
       if (!auth.state.bound) { redirect('/setup'); return; }
-      if (request.method === 'GET') { html(200, loginPage()); return; }
+      const nextPath = ssoNext(url.searchParams.get('next'));
+      if (request.method === 'GET') { if (session) redirect(nextPath); else html(200, loginPage('', nextPath)); return; }
       if (request.method !== 'POST') { reply(405, 'Method not allowed'); return; }
-      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, loginPage('尝试次数过多，请 10 分钟后再试。')); return; }
+      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, loginPage('尝试次数过多，请 10 分钟后再试。', nextPath)); return; }
       const values = await form(), token = auth.login(values.get('code'));
-      if (!token) { html(401, loginPage('动态码无效或已使用，请等待验证器更新后重试。')); return; }
-      issue(token); redirect('/'); return;
+      if (!token) { html(401, loginPage('动态码无效或已使用，请等待验证器更新后重试。', nextPath)); return; }
+      issue(token); redirect(nextPath); return;
     }
-    const session = auth.session(cookies.get(cookieName));
     if (!session) {
       if (url.pathname.startsWith('/api/')) reply(401, JSON.stringify({ error: auth.state.bound ? '请使用验证器动态码登录。' : '请先绑定验证器。', code: auth.state.bound ? 'UNAUTHORIZED' : 'TOTP_NOT_BOUND' }), 'application/json');
       else redirect(auth.state.bound ? '/login' : '/setup');
@@ -85,6 +92,7 @@ createServer(async (request, response) => {
       if (request.method !== 'POST') { reply(405, 'Method not allowed'); return; }
       auth.logout(); response.setHeader('Set-Cookie', [cookie(cookieName, '', 0), cookie('sma_center_session', '', 0), cookie('atlas_session', '', 0)]); redirect('/login'); return;
     }
+    if (!oidc && url.pathname === '/applications') { reply(503, '尚未启用统一登录，请按 docs/sso-integration.md 配置 SSO。', 'text/plain; charset=utf-8'); return; }
     if (url.pathname === '/security') {
       if (request.method === 'POST') {
         const values = await form();
