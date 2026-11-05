@@ -1,8 +1,24 @@
 # 部署核对记录
 
-最近核对日期：2026-11-04（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
+最近核对日期：2026-11-06（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
 
-## 2026-11-04 PR #5 版本同步优化上线（当前部署）
+## 2026-11-06 可配置面板与持续采样上线（当前部署）
+
+- 功能 [PR #7](https://github.com/Leexxin/sma-center/pull/7)、现场构建范围修复 [PR #8](https://github.com/Leexxin/sma-center/pull/8) 已合并；生产业务提交为 `ac0e8b707282a08f60786b57d701f3b6d1dc1e69`。运行镜像 `sha256:8782caab9f9422c186b4c9375dee93f3b9bd76a174bf704e9df50046c5f0aa1e`，另标记 `sma-center:ac0e8b707282`，容器 running/healthy。
+- 首页切换为多面板与可配置卡片，支持拖拽/按钮排序、四种尺寸、撤销/重做、草稿、revision 冲突保护、文本与历史卡片。采用选定的蓝色 S 图标，移除欢迎口号、重复身份标签与常驻拖拽文字；原资源、发现、版本中心、SSO 和安全入口保留。功能、迁移与限制见 [面板与卡片](workspace.md)。
+- 首次生产构建因 `/opt/sma-center/releases/049016b` 现场旧源码被 TypeScript 纳入检查而失败，当时仍由旧镜像运行且健康，没有启动失败的新版本。PR #8 排除根目录快照后构建成功；未删除旧快照，`app/sma/releases/` 版本中心页面仍在编译路由清单。交付归档 SHA-256 为 `e02cdf5bb3fb82dafe60259463fec16b0bd643028ea1f584a3ccea19ee360892`。
+- 按原 `compose.yaml` 与现场 `compose.override.yaml` 构建、切换；端口 `192.168.33.124:8080`、外部卷 `sma-center-data` 和 Compose 配置摘要保持不变。没有更改网络、重置验证器、轮换 Token、修改 SSO 客户端或安装/重启 Agent。
+- 最近升级前整卷备份 `/root/sma-center-backups/sma-center-20261105-163130.tar.gz`，SHA-256 `1f29004695b417b62a97f52600d2cae468d88fa5a45216c1050ba5370de4e6b0`；对应旧业务镜像保留为 `sma-center:rollback-20261105T163132Z`。应配套使用首次交付前的旧源码快照 `/root/sma-center-backups/source-20261105T162412Z.tar.gz`，SHA-256 `a831d11f9502648253e3a1c4a76dcef80cac16b8db51958d321676a5e9d37f24`。两份归档均已检查可读。文件名为服务器 UTC，北京时间已是 11 月 6 日。
+- 首次尝试的完整备份 `sma-center-20261105-162411.tar.gz` 及后续源码快照 `source-20261105T163132Z.tar.gz` 也予以保留；后者是首次失败后已交付 PR #7 的源码状态，不能当成与旧业务镜像对应的原始源码。
+- 上线前后均有资源 12 条、用户记录 1 条、偏好 1 条、加密 SMA 凭据 8 条；资源、偏好和凭据整表内容摘要一致。`secrets.json`、`totp-auth.json`、`oidc-clients.json`、`oidc-signing-key.pem` 与升级前整卷备份字节摘要一致。打开首页正常更新用户 last_seen_at，不将用户整行摘要不变作为验收条件。未输出真实凭据、密钥或会话。
+- 新增 dashboards、monitor_samples、monitor_events 表；原资源 ID 和凭据存储不变。现有会话打开生产新版首页成功，自动生成一个总览面板。没有在生产保存测试布局、创建测试资源、导入备份、重绑验证器或进行故障注入。
+- 后台已覆盖 8 台既有 Agent，连续多个周期产生持久历史；核对时 8 台均有有效 CPU 数值。上游 5 台返回部分采集错误、3 台返回完整数据，界面按 partial/valid 显示并保留有效 CPU/内存/系统盘，不把部分异常涂成全部正常。本次未更改或排障修复这些 Agent；核对时事件表为空，未在生产制造负载验证告警触发。
+- `/healthz` 返回 200/ok，未认证 `/api/dashboards` 和 `/api/observability` 返回 401，`/favicon.png` 返回 200。SSO Discovery 为原 HTTP IP issuer，PKCE 仍为 S256。正式业务系统的重新登录/回调流程未在本次生产验收中主动执行。
+- 切换后已对业务提交的 192 个 Git 跟踪文件进行 SHA-256 核对，服务器交付源码与运行容器全部一致；后续上线记录与回退说明为独立文档提交，不重建上述业务镜像，容器内文档仍为构建时快照。
+- 业务版本完整回归 76/76 通过、无跳过，包含隔离 Chrome、原生认证、SSO、卡片表单、布局持久化、桌面几何、窄屏、并发冲突、备份及无首页持续采样。Lint 和本地生产构建通过，并人工检查实际截图；构建隔离修复额外用故意含类型错误的旧快照验证构建/Lint通过，单元回归 72 通过、4 个浏览器入口按默认条件跳过。仓库未配置远端 CI，不声称 GitHub Actions 已通过。
+- 尚未交付数据库/中间件性能连接器、站点主动探测、日志/链路、外部通知或多进程采样；新资源类型当前支持资源卡片与入口。手机只在隔离浏览器验证，未做生产物理触屏、屏幕阅读器、生产规模压测或实际回滚演练。旧 UI 不识别新资源类型；回退条件与恢复的数据损失边界见面板文档及运维手册。
+
+## 2026-11-04 PR #5 版本同步优化上线（历史部署）
 
 - [PR #5](https://github.com/Leexxin/sma-center/pull/5) 已合并，生产业务源码为 `4d888f67545c082303fad4fd49c899de107bd1e6`。运行镜像 `sha256:a9831a90b3ce0cf50040c36a31f8107a3a6b6d4b3204bb89ddd00584f7ef55bf`，另标记 `sma-center:4d888f67545c`，容器 running/healthy。
 - 按原 `/opt/sma-center/compose.yaml` 和 `compose.override.yaml` 构建并切换，端口 `192.168.33.124:8080`、外部数据卷 `sma-center-data` 和两个 Compose 文件摘要均保持不变。没有调整网关/网络、重置 TOTP、轮换 Token、修改 SSO 客户端或执行 Agent 安装。
