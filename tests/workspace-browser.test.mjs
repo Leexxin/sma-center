@@ -16,7 +16,7 @@ import { TotpAuth, totp } from "../deploy/totp-auth.mjs";
 
 test(
   "workspace persists layouts, rejects stale writes, exports boards and samples without a dashboard open",
-  { timeout: 145000, skip: process.env.SMA_CENTER_BROWSER_TEST !== "1" },
+  { timeout: 180000, skip: process.env.SMA_CENTER_BROWSER_TEST !== "1" },
   async () => {
     const directory = mkdtempSync(join(tmpdir(), "sma-workspace-browser-")),
       profile = join(directory, "chrome");
@@ -29,6 +29,21 @@ test(
     const agent = createServer((req, res) => {
       if (req.url === "/version") {
         res.end(JSON.stringify({ version: "v0.2.8" }));
+        return;
+      }
+      if (req.url === "/v1/discovery/capabilities") {
+        res.end(
+          JSON.stringify({
+            enabled: true,
+            detectors: ["database", "middleware"],
+            reportEnabled: false,
+            maxConcurrency: 1,
+          }),
+        );
+        return;
+      }
+      if (req.url === "/v1/discovery/runs") {
+        res.end(JSON.stringify({ runs: [] }));
         return;
       }
       requests++;
@@ -85,6 +100,7 @@ test(
       }),
       { mode: 0o600 },
     );
+    writeFileSync(join(directory, "oidc-clients.json"), "[]", { mode: 0o600 });
     const children = [];
     let socket;
     const errors = [];
@@ -98,6 +114,8 @@ test(
             SMA_CENTER_DATA_DIR: directory,
             PORT: String(port),
             SMA_CENTER_MONITOR_ENABLED: "true",
+            SMA_CENTER_SSO_ISSUER: origin,
+            SMA_CENTER_SECURE_COOKIES: "false",
           },
           stdio: "pipe",
         }),
@@ -228,6 +246,45 @@ test(
           geometry.top < 5,
         "desktop geometry: " + JSON.stringify(geometry),
       );
+      // The old resource entry opens management inside the overview frame.
+      await call("Page.navigate", { url: origin + "/resources" });
+      await until(
+        "location.pathname==='/' && !!document.querySelector('.ui-resource-list')",
+      );
+      await evaluate(
+        "[...document.querySelectorAll('button')].find(b=>b.textContent==='添加资源').click()",
+      );
+      await until("!!document.querySelector('.ws-config input[type=url]')");
+      for (const [label, text] of [
+        ["名称", "UI Resource"],
+        ["地址", "https://ui.example.invalid"],
+      ]) {
+        await evaluate(
+          `(()=>{const label=[...document.querySelectorAll('.ws-config label')].find(e=>e.firstChild.textContent.trim()===${JSON.stringify(label)});label.querySelector('input').focus()})()`,
+        );
+        await call("Input.insertText", { text });
+      }
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until(
+        "document.querySelector('.ui-resource-list')?.textContent.includes('UI Resource')",
+      );
+      assert(
+        (await api("/api/resources")).body.some(
+          (r) => r.name === "UI Resource",
+        ),
+      );
+      await evaluate(
+        "document.querySelector('[aria-label=\"添加 UI Resource 到面板\"]').click()",
+      );
+      await until("!!document.querySelector('.ws-editbar')");
+      await evaluate(
+        "[...document.querySelectorAll('button')].find(b=>b.textContent==='保存').click()",
+      );
+      await until("!document.querySelector('.ws-editbar')");
+      await call("Page.navigate", { url: origin + "/" });
+      await until(
+        "!!document.querySelector('.workspace') && document.body.textContent.includes('更新于') && !document.querySelector('[role=dialog]')",
+      );
       const before = (await api("/api/dashboards")).body;
       assert.equal(before.length, 1);
       await evaluate(
@@ -329,8 +386,30 @@ test(
         url: "https://node.example.invalid",
         status: "unknown",
         agentUrl: `http://127.0.0.1:${agent.address().port}`,
+        agentToken: "isolated-qa-agent-token",
       });
       assert.equal(resource.status, 201);
+      // Editing metadata must preserve an existing write-only credential.
+      await call("Page.navigate", { url: origin + "/?view=resources" });
+      await until(
+        "document.querySelector('.ui-resource-list')?.textContent.includes('QA Node') && document.body.textContent.includes('更新于')",
+      );
+      await evaluate(
+        "document.querySelector('[aria-label=\"编辑 QA Node\"]').click()",
+      );
+      await until("!!document.querySelector('input[type=password]')");
+      assert.equal(
+        await evaluate("document.querySelector('input[type=password]').value"),
+        "",
+      );
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until("!document.querySelector('input[type=password]')");
+      assert.equal(
+        (await api("/api/resources")).body.find(
+          (r) => r.id === resource.body.id,
+        ).credentialConfigured,
+        true,
+      );
       const backup = await api("/api/backup");
       assert.equal(backup.status, 200);
       assert(backup.body.dashboards.some((b) => b.name === "测试面板"));
@@ -343,12 +422,89 @@ test(
       assert(
         (await api("/api/dashboards")).body.some((b) => b.name === "测试面板"),
       );
+      // Global theme is persisted across React and native form pages.
+      await call("Page.navigate", { url: origin + "/?view=settings" });
+      await until("!!document.querySelector('.ui-settings')");
+      assert.equal(
+        await evaluate(
+          "document.querySelector('.ui-settings').textContent.includes('欢迎语')",
+        ),
+        false,
+      );
+      const preference = restored.body.preferences;
+      assert.equal(
+        (
+          await api("/api/preferences", "PUT", {
+            ...preference,
+            theme: "light",
+            accent: "violet",
+          })
+        ).status,
+        200,
+      );
+      const capture = async (name) => {
+        if (!process.env.SMA_CENTER_CONSOLE_SCREENSHOTS) return;
+        await evaluate(
+          "new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))",
+        );
+        const shot = await call("Page.captureScreenshot", {
+          format: "png",
+          captureBeyondViewport: true,
+        });
+        writeFileSync(
+          join(process.env.SMA_CENTER_CONSOLE_SCREENSHOTS, name + ".png"),
+          Buffer.from(shot.data, "base64"),
+        );
+      };
+      for (const [path, heading] of [
+        ["/", "总览"],
+        ["/servers/" + resource.body.id, "QA Node"],
+        ["/security", "安全设置"],
+        ["/applications", "业务应用"],
+        ["/not-a-page", "页面未找到"],
+      ]) {
+        await call("Page.navigate", { url: origin + path });
+        await until(
+          `location.pathname===${JSON.stringify(path)} && !!document.querySelector('.workspace.ws-light.ws-accent-violet') && document.body.textContent.includes(${JSON.stringify(heading)})`,
+        );
+        assert.equal(
+          await evaluate("document.querySelectorAll('.ws-sidebar').length"),
+          1,
+        );
+        await until(
+          "getComputedStyle(document.querySelector('.workspace')).getPropertyValue('--ws-bg').trim()==='#f5f6fa'",
+        );
+        for (const width of [1440, 768, 390]) {
+          await call("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: 900,
+            deviceScaleFactor: 1,
+            mobile: width === 390,
+          });
+          assert.equal(
+            await evaluate("document.documentElement.scrollWidth<=innerWidth"),
+            true,
+            path + " width " + width,
+          );
+          await capture(
+            (path === "/" ? "overview" : path.split("/")[1]) + "-" + width,
+          );
+        }
+      }
+      await call("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 1000,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
       // Remove the UI from the tab; sampling must continue in the gateway process.
       await call("Page.navigate", { url: origin + "/security" });
       await until("location.pathname==='/security'");
-      for (let i = 0; i < 1000 && requests < 2; i++) await delay(100);
+      const requestsWithoutUI = requests;
+      for (let i = 0; i < 1000 && requests < requestsWithoutUI + 2; i++)
+        await delay(100);
       assert(
-        requests >= 2,
+        requests >= requestsWithoutUI + 2,
         "background sampler keeps running with no dashboard open; requests=" +
           requests +
           ": " +

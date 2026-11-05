@@ -7,13 +7,16 @@ import { join } from 'node:path';
 import { OidcProvider, ssoNext } from './oidc.mjs';
 import { TotpAuth } from './totp-auth.mjs';
 import { REFERRER_POLICY, validWriteOrigin } from './request-origin.mjs';
+import { nativePage } from './console-pages.mjs';
 import { setupPage, enrollPage, loginPage, securityPage } from './auth-pages.mjs';
 const directory = process.env.SMA_CENTER_DATA_DIR || new URL('../.sma-center-data/', import.meta.url).pathname;
+process.env.SMA_CENTER_DATA_DIR ||= directory;
 mkdirSync(directory, { recursive: true });
 const secretsFile = join(directory, 'secrets.json');
 if (!existsSync(secretsFile)) writeFileSync(secretsFile, JSON.stringify({ session: randomBytes(32).toString('hex'), credential: randomBytes(32).toString('base64') }), { mode: 0o600 });
 const secrets = JSON.parse(readFileSync(secretsFile, 'utf8'));
 process.env.SMA_CREDENTIAL_KEY = secrets.credential;
+const { env: { DB: consoleDb } } = await import('./sqlite-env.mjs');
 const auth = new TotpAuth(directory, secrets.session);
 if (process.argv[2] === 'reset-2fa') { auth.reset(); console.log('2FA reset. Read /data/setup-code.txt to bind again.'); process.exit(0); }
 if (process.argv.length > 2) throw new Error('Only the server-side reset-2fa command is supported.');
@@ -34,7 +37,7 @@ createServer(async (request, response) => {
     const cookies = new Map((request.headers.cookie || '').split(';').map(x => { const at = x.indexOf('='); return [x.slice(0, at).trim(), x.slice(at + 1)]; }));
     const cookie = (name, value, age, path = '/') => `${name}=${value}; Path=${path}; HttpOnly; SameSite=${name === cookieName ? 'Lax' : 'Strict'}; Max-Age=${age}${process.env.SMA_CENTER_SECURE_COOKIES === 'true' ? '; Secure' : ''}`;
     const reply = (status, body, type = 'text/html; charset=utf-8') => { response.writeHead(status, { 'Content-Type': type }); response.end(body); };
-    const html = (status, body, formAction = "'self'") => { response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`); reply(status, body); };
+    const html = (status, body, formAction = "'self'") => { response.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`); reply(status, body); };
     const redirect = path => { response.writeHead(303, { Location: path }); response.end(); };
     const issue = token => response.setHeader('Set-Cookie', cookie(cookieName, token, auth.state.ttlSeconds));
     const form = async () => {
@@ -46,19 +49,22 @@ createServer(async (request, response) => {
     if (url.pathname === '/healthz' && request.method === 'GET') { reply(200, 'ok', 'text/plain'); return; }
     if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(request.method)) { reply(405, 'Method not allowed'); return; }
     const session = auth.session(cookies.get(cookieName));
+    const preference = await consoleDb.prepare("SELECT theme, accent, density FROM user_preferences WHERE user_id = 'selfhost:admin'").first();
+    const boardRows = await consoleDb.prepare("SELECT id,name FROM dashboards WHERE user_id = 'selfhost:admin' ORDER BY created_at,id").all();
+    const presentation = { ...preference, boards: boardRows.results };
     const validOrigin = validWriteOrigin(request.headers, oidc?.issuer || url.origin);
-    if (oidc && await oidc.handle(request, response, url, session, { form, html, redirect, reply, validOrigin })) return;
+    if (oidc && await oidc.handle(request, response, url, session, { form, html, redirect, reply, validOrigin, presentation })) return;
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !validOrigin) { reply(403, '表单来源验证失败，请重新打开当前页面后再提交。'); return; }
     if (url.pathname === '/atlas-login' || url.pathname === '/signin-with-chatgpt') { redirect('/login'); return; }
-    if (['/favicon.svg', '/favicon.png', '/sma-icon.png', '/apple-touch-icon.png'].includes(url.pathname) && ['GET', 'HEAD'].includes(request.method)) { reply(200, readFileSync(join(process.cwd(), 'public', url.pathname.slice(1))), url.pathname.endsWith('.svg') ? 'image/svg+xml' : 'image/png'); return; }
+    if (['/favicon.svg', '/favicon.png', '/sma-icon.png', '/apple-touch-icon.png', '/console.css'].includes(url.pathname) && ['GET', 'HEAD'].includes(request.method)) { reply(200, readFileSync(join(process.cwd(), 'public', url.pathname.slice(1))), url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : url.pathname.endsWith('.svg') ? 'image/svg+xml' : 'image/png'); return; }
     if (url.pathname.startsWith('/setup')) {
       if (auth.state.bound) { redirect('/login'); return; }
       if (!['GET', 'POST'].includes(request.method)) { reply(405, 'Method not allowed'); return; }
-      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, setupPage('尝试次数过多，请 10 分钟后再试。')); return; }
-      if (url.pathname === '/setup' && request.method === 'GET') { html(200, setupPage()); return; }
+      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, setupPage('尝试次数过多，请 10 分钟后再试。',presentation)); return; }
+      if (url.pathname === '/setup' && request.method === 'GET') { html(200, setupPage(undefined, presentation)); return; }
       if (url.pathname === '/setup/authorize' && request.method === 'POST') {
         const values = await form(), nonce = auth.authorizeSetup(values.get('setupCode'));
-        if (!nonce) { html(401, setupPage('授权码无效，请检查部署时提供的一次性绑定码。')); return; }
+        if (!nonce) { html(401, setupPage('授权码无效，请检查部署时提供的一次性绑定码。',presentation)); return; }
         response.setHeader('Set-Cookie', cookie(enrollmentCookie, nonce, 600, '/setup')); redirect('/setup/verify'); return;
       }
       if (['/setup/verify', '/setup/confirm'].includes(url.pathname)) {
@@ -70,18 +76,18 @@ createServer(async (request, response) => {
         } else if (!(url.pathname === '/setup/verify' && request.method === 'GET')) { reply(405, 'Method not allowed'); return; }
         const uri = `otpauth://totp/sma-center:owner?secret=${secret}&issuer=sma-center&algorithm=SHA1&digits=6&period=30`;
         const qr = await QRCode.toDataURL(uri, { margin: 1, width: 240, errorCorrectionLevel: 'M' });
-        html(request.method === 'POST' ? 401 : 200, enrollPage(secret, qr, request.method === 'POST' ? '动态码无效，请确认手机时间并重试。' : '')); return;
+        html(request.method === 'POST' ? 401 : 200, enrollPage(secret, qr, request.method === 'POST' ? '动态码无效，请确认手机时间并重试。' : '',presentation)); return;
       }
       reply(404, 'Not found'); return;
     }
     if (url.pathname === '/login') {
       if (!auth.state.bound) { redirect('/setup'); return; }
       const nextPath = ssoNext(url.searchParams.get('next'));
-      if (request.method === 'GET') { if (session) redirect(nextPath); else html(200, loginPage('', nextPath)); return; }
+      if (request.method === 'GET') { if (session) redirect(nextPath); else html(200, loginPage('', nextPath,presentation)); return; }
       if (request.method !== 'POST') { reply(405, 'Method not allowed'); return; }
-      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, loginPage('尝试次数过多，请 10 分钟后再试。', nextPath)); return; }
+      if (auth.limited()) { response.setHeader('Retry-After', '600'); html(429, loginPage('尝试次数过多，请 10 分钟后再试。', nextPath,presentation)); return; }
       const values = await form(), token = auth.login(values.get('code'));
-      if (!token) { html(401, loginPage('动态码无效或已使用，请等待验证器更新后重试。', nextPath)); return; }
+      if (!token) { html(401, loginPage('动态码无效或已使用，请等待验证器更新后重试。', nextPath,presentation)); return; }
       issue(token); redirect(nextPath); return;
     }
     if (!session) {
@@ -93,15 +99,15 @@ createServer(async (request, response) => {
       if (request.method !== 'POST') { reply(405, 'Method not allowed'); return; }
       auth.logout(); response.setHeader('Set-Cookie', [cookie(cookieName, '', 0), cookie('sma_center_session', '', 0), cookie('atlas_session', '', 0)]); redirect('/login'); return;
     }
-    if (!oidc && url.pathname === '/applications') { reply(503, '尚未启用统一登录，请按 docs/sso-integration.md 配置 SSO。', 'text/plain; charset=utf-8'); return; }
+    if (!oidc && url.pathname === '/applications') { html(503, nativePage('业务应用','尚未启用统一登录。','<p>请按 SSO 接入文档配置。</p>',{...presentation,authenticated:true,current:'applications'})); return; }
     if (url.pathname === '/security') {
       if (request.method === 'POST') {
         const values = await form();
-        try { auth.setDuration(Number(values.get('ttlMinutes'))); } catch (error) { html(400, securityPage(auth.state.ttlSeconds / 60, session.expires, error.message)); return; }
+        try { auth.setDuration(Number(values.get('ttlMinutes'))); } catch (error) { html(400, securityPage(auth.state.ttlSeconds / 60, session.expires, error.message,false,presentation)); return; }
         issue(auth.issueSession()); redirect('/security?saved=1'); return;
       }
       if (request.method !== 'GET') { reply(405, 'Method not allowed'); return; }
-      html(200, securityPage(auth.state.ttlSeconds / 60, session.expires, '', url.searchParams.get('saved') === '1')); return;
+      html(200, securityPage(auth.state.ttlSeconds / 60, session.expires, '', url.searchParams.get('saved') === '1',presentation)); return;
     }
     request.headers['sma-center-authenticated'] = 'totp-v1'; request.headers['sma-center-owner-id'] = session.ownerId;
     await handle(request, response);

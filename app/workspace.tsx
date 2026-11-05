@@ -1,8 +1,5 @@
 "use client";
 
-import Link from "next/link";
-import Image from "next/image";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -12,22 +9,17 @@ import {
   Bell,
   ChevronRight,
   Database,
-  Download,
   GripVertical,
   LayoutGrid,
   Layers,
   Link as LinkIcon,
-  Menu,
-  Moon,
   MoreHorizontal,
   Plus,
   Redo2,
   Search,
   Server,
   Settings,
-  ShieldCheck,
   StickyNote,
-  Sun,
   Trash2,
   Undo2,
   Wrench,
@@ -51,7 +43,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Toaster } from "@/components/ui/sonner";
+import ConsoleShell, { type ConsoleView } from "@/components/console/shell";
+import ResourceManager, {
+  ResourceEditor,
+  dialogTheme,
+} from "@/components/console/resource-manager";
+import ConsoleSettings from "@/components/console/settings";
+import ServerMetrics from "@/components/console/server-metrics";
 import { toast } from "sonner";
 import {
   metricLabels,
@@ -198,17 +196,38 @@ function History({
 }
 export default function Workspace({
   initialBoards,
-  resources,
+  resources: initialResources,
   initialPreferences,
+  initialView,
+  initialBoard,
 }: {
   initialBoards: Board[];
   resources: Resource[];
   initialPreferences: Preferences;
+  initialView?: string;
+  initialBoard?: string;
 }) {
+  const [resources, setResources] = useState(initialResources);
+  const [resourceOpen, setResourceOpen] = useState(initialView === "resources");
+  const [settingsOpen, setSettingsOpen] = useState(initialView === "settings");
+  const [resourceEditor, setResourceEditor] = useState<
+    Resource | null | undefined
+  >(undefined);
   const [boards, setBoards] = useState(initialBoards),
-    [activeId, setActiveId] = useState(initialBoards[0].id);
+    [activeId, setActiveId] = useState(
+      initialBoards.some((b) => b.id === initialBoard)
+        ? initialBoard!
+        : initialBoards[0].id,
+    );
   const active = boards.find((b) => b.id === activeId) || boards[0];
-  const [draft, setDraft] = useState<Board | null>(null),
+  const [draft, setDraft] = useState<Board | null>(
+      initialView === "gallery"
+        ? structuredClone(
+            initialBoards.find((b) => b.id === initialBoard) ||
+              initialBoards[0],
+          )
+        : null,
+    ),
     [past, setPast] = useState<Board[]>([]),
     [future, setFuture] = useState<Board[]>([]);
   const [preferences, setPreferences] = useState(initialPreferences),
@@ -218,14 +237,14 @@ export default function Workspace({
     [series, setSeries] = useState<
       Record<string, { points: Point[]; error?: boolean }>
     >({});
-  const [gallery, setGallery] = useState(false),
+  const [gallery, setGallery] = useState(initialView === "gallery"),
     [configure, setConfigure] = useState<Widget | null>(null),
     [selected, setSelected] = useState<WidgetType>("resource"),
-    [boardDialog, setBoardDialog] = useState(false),
+    [boardDialog, setBoardDialog] = useState(initialView === "new-board"),
     [newName, setNewName] = useState("");
   const [detail, setDetail] = useState<Resource | null>(null),
-    [eventOpen, setEventOpen] = useState(false),
-    [connections, setConnections] = useState(false),
+    [eventOpen, setEventOpen] = useState(initialView === "events"),
+    [connections, setConnections] = useState(initialView === "sources"),
     [saving, setSaving] = useState(false),
     [query, setQuery] = useState("");
   const dragId = useRef<string | null>(null),
@@ -397,23 +416,6 @@ export default function Workspace({
       setBoards((bs) => bs.filter((b) => b.id !== active.id));
       setActiveId(boards.find((b) => b.id !== active.id)!.id);
     } catch (e) {
-      toast.error((e as Error).message);
-    }
-  }
-  async function toggleTheme() {
-    const next: Preferences = {
-      ...preferences,
-      theme: preferences.theme === "light" ? "dark" : "light",
-    };
-    setPreferences(next);
-    try {
-      await json("/api/preferences", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
-      });
-    } catch (e) {
-      setPreferences(preferences);
       toast.error((e as Error).message);
     }
   }
@@ -699,750 +701,745 @@ export default function Workspace({
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
+  function openView(view: ConsoleView) {
+    if (view === "resources") setResourceOpen(true);
+    if (view === "events") setEventOpen(true);
+    if (view === "sources") setConnections(true);
+    if (view === "gallery") {
+      setQuery("");
+      openGallery();
+    }
+    if (view === "settings") setSettingsOpen(true);
+  }
+  function addResourceCard(resource: Resource) {
+    const base = draft || active;
+    if (base.widgets.length >= 60) {
+      toast.error("最多添加 60 张卡片。");
+      return;
+    }
+    const next = {
+      ...base,
+      widgets: [
+        ...base.widgets,
+        {
+          version: 1 as const,
+          id: crypto.randomUUID(),
+          type: "resource" as const,
+          title: "",
+          size: "medium" as const,
+          resourceId: resource.id,
+          metric: "cpuPercent" as const,
+          text: "",
+          threshold: 90,
+        },
+      ],
+    };
+    if (draft) change(next);
+    else {
+      setPast([base]);
+      setFuture([]);
+      setDraft(next);
+    }
+    setQuery("");
+    setResourceOpen(false);
+  }
+  async function restored(
+    nextResources: Resource[],
+    nextPreferences: Preferences,
+  ) {
+    const nextBoards = await json<Board[]>("/api/dashboards");
+    setResources(nextResources);
+    setPreferences(nextPreferences);
+    setBoards(nextBoards);
+    setActiveId(nextBoards[0].id);
+    setDraft(null);
+  }
   return (
     <>
-      <Toaster position="top-right" />
-      <div
-        className={`workspace ws-${preferences.theme} ws-${preferences.density}`}
-      >
-        <aside className="ws-sidebar">
-          <Link className="ws-brand" href="/">
-            <Image
-              unoptimized
-              src="/sma-icon.png"
-              width="34"
-              height="34"
-              alt=""
+      <ConsoleShell
+        context={{ preferences, boards, resourceCount: resources.length }}
+        breadcrumb={active.name}
+        activeId={active.id}
+        editing={!!draft}
+        onSelectBoard={(id) => setActiveId(id)}
+        onNewBoard={() => {
+          setNewName("");
+          setBoardDialog(true);
+        }}
+        onView={openView}
+        onPreferencesChange={setPreferences}
+        toolbar={
+          <label className="ws-search">
+            <Search size={15} />
+            <input
+              aria-label="搜索卡片"
+              placeholder="搜索"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              disabled={!!draft}
             />
-            <strong>SMA Center</strong>
-          </Link>
-          <div className="ws-navcaption">
-            面板
-            <button
-              aria-label="新建面板"
-              onClick={() => {
-                setNewName("");
-                setBoardDialog(true);
-              }}
-              disabled={!!draft || boards.length >= 12}
-            >
-              <Plus size={15} />
-            </button>
-          </div>
-          <nav aria-label="面板">
-            {boards.map((b) => (
-              <button
-                key={b.id}
-                aria-current={b.id === active.id ? "page" : undefined}
-                disabled={!!draft}
-                onClick={() => setActiveId(b.id)}
-              >
-                <LayoutGrid size={17} />
-                <span>{b.name}</span>
-              </button>
-            ))}
-          </nav>
-          <div className="ws-navcaption">管理</div>
-          <nav aria-label="管理">
-            <a href="/resources">
-              <Layers size={17} />
-              资源管理<span>{resources.length}</span>
-            </a>
-            <button onClick={() => setEventOpen(true)}>
-              <Bell size={17} />
-              事件
-              {activeEvents.length > 0 && (
-                <span className="ws-event-count">{activeEvents.length}</span>
-              )}
-            </button>
-            <button onClick={() => setConnections(true)}>
-              <Activity size={17} />
-              数据连接
-            </button>
-            <button onClick={openGallery}>
-              <LayoutGrid size={17} />
-              卡片库
-            </button>
-          </nav>
-          <div className="ws-sidebar-bottom">
-            <a href="/sma/releases">
-              <Download size={16} />
-              SMA 版本中心
-            </a>
-            <a href="/applications">
-              <LinkIcon size={16} />
-              业务应用
-            </a>
-            <a href="/security">
-              <ShieldCheck size={16} />
-              安全设置
-            </a>
-            <a href="/resources">
-              <Settings size={16} />
-              设置与备份
-            </a>
-          </div>
-        </aside>
-        <main className="ws-main">
-          <div className="ws-top">
-            <div className="ws-breadcrumb">
-              <span>面板</span>
-              <ChevronRight size={13} />
-              <span>{active.name}</span>
-            </div>
-            <div className="ws-top-actions">
-              <label className="ws-search">
-                <Search size={15} />
-                <input
-                  aria-label="搜索卡片"
-                  placeholder="搜索"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  disabled={!!draft}
-                />
-                {query && (
-                  <button aria-label="清空搜索" onClick={() => setQuery("")}>
-                    <X size={13} />
-                  </button>
-                )}
-              </label>
-              <button
-                className="ws-icon-button"
-                aria-label={
-                  preferences.theme === "dark" ? "切换浅色" : "切换深色"
-                }
-                onClick={toggleTheme}
-              >
-                {preferences.theme === "dark" ? (
-                  <Sun size={18} />
-                ) : (
-                  <Moon size={18} />
-                )}
-              </button>
-              <details className="ws-mobile-menu">
-                <summary aria-label="导航">
-                  <Menu size={18} />
-                </summary>
-                <div>
-                  {boards.map((b) => (
-                    <button
-                      key={b.id}
-                      disabled={!!draft}
-                      onClick={() => setActiveId(b.id)}
-                    >
-                      {b.name}
-                    </button>
-                  ))}
-                  <button
-                    disabled={!!draft}
-                    onClick={() => setBoardDialog(true)}
-                  >
-                    新建面板
-                  </button>
-                  <a href="/resources">资源管理</a>
-                  <button onClick={() => setEventOpen(true)}>事件</button>
-                  <button onClick={() => setConnections(true)}>数据连接</button>
-                  <a href="/sma/releases">SMA 版本中心</a>
-                  <a href="/security">安全设置</a>
-                  <a href="/applications">业务应用</a>
-                </div>
-              </details>
-            </div>
-          </div>
-          <header className="ws-heading">
-            <div>
-              <h1>{active.name}</h1>
-              <p>
-                {resources.length} 项资源
-                {observation && ` · 更新于 ${time(observation.receivedAt)}`}
-              </p>
-            </div>
-            <div className="ws-actions">
-              <button
-                onClick={() => {
-                  setQuery("");
-                  begin();
-                }}
-                disabled={!!draft}
-              >
-                <Pencil size={14} />
-                编辑
-              </button>
-              <button className="ws-primary" onClick={openGallery}>
-                <Plus size={16} />
-                添加卡片
-              </button>
-            </div>
-          </header>
-          {offline && (
-            <div role="alert" className="ws-banner">
-              指标更新失败，显示内容可能已过期。
-              <button onClick={poll}>重试</button>
-            </div>
-          )}
-          {observation && !observation.enabled && (
-            <div className="ws-banner">后台采集已关闭。</div>
-          )}
-          <div className="ws-toolbar">
-            <div className="ws-range" aria-label="时间范围">
-              {[1, 6, 24, 168].map((h) => (
-                <button
-                  key={h}
-                  aria-pressed={hours === h}
-                  onClick={() => setHours(h)}
-                >
-                  {h === 168 ? "7 天" : `${h} 小时`}
-                </button>
-              ))}
-            </div>
-            {!draft && (
-              <button
-                className="ws-icon-button"
-                disabled={boards.length <= 1}
-                onClick={deleteBoard}
-                aria-label="删除面板"
-              >
-                <Trash2 size={15} />
+            {query && (
+              <button aria-label="清空搜索" onClick={() => setQuery("")}>
+                <X size={13} />
               </button>
             )}
+          </label>
+        }
+      >
+        <header className="ws-heading">
+          <div>
+            <h1>{active.name}</h1>
+            <p>
+              {resources.length} 项资源
+              {observation && ` · 更新于 ${time(observation.receivedAt)}`}
+            </p>
           </div>
-          {draft && (
-            <div className="ws-editbar">
-              <input
-                aria-label="面板名称"
-                maxLength={40}
-                value={draft.name}
-                onChange={(e) => change({ ...draft, name: e.target.value })}
-              />
+          <div className="ws-actions">
+            <button
+              onClick={() => {
+                setQuery("");
+                begin();
+              }}
+              disabled={!!draft}
+            >
+              <Pencil size={14} />
+              编辑
+            </button>
+            <button className="ws-primary" onClick={openGallery}>
+              <Plus size={16} />
+              添加卡片
+            </button>
+          </div>
+        </header>
+        {offline && (
+          <div role="alert" className="ws-banner">
+            指标更新失败，显示内容可能已过期。
+            <button onClick={poll}>重试</button>
+          </div>
+        )}
+        {observation && !observation.enabled && (
+          <div className="ws-banner">后台采集已关闭。</div>
+        )}
+        <div className="ws-toolbar">
+          <div className="ws-range" aria-label="时间范围">
+            {[1, 6, 24, 168].map((h) => (
               <button
-                aria-label="撤销"
-                disabled={!past.length || saving}
-                onClick={() => {
-                  setFuture((f) => [draft, ...f]);
-                  setDraft(past[past.length - 1]);
-                  setPast((p) => p.slice(0, -1));
-                }}
+                key={h}
+                aria-pressed={hours === h}
+                onClick={() => setHours(h)}
               >
-                <Undo2 size={16} />
+                {h === 168 ? "7 天" : `${h} 小时`}
               </button>
-              <button
-                aria-label="重做"
-                disabled={!future.length || saving}
-                onClick={() => {
-                  setPast((p) => [...p, draft]);
-                  setDraft(future[0]);
-                  setFuture((f) => f.slice(1));
-                }}
-              >
-                <Redo2 size={16} />
-              </button>
-              <span className="ws-spacer" />
-              <button onClick={cancel} disabled={saving}>
-                取消
-              </button>
-              <button
-                className="ws-primary"
-                onClick={save}
-                disabled={saving || !draft.name.trim()}
-              >
-                {saving ? "保存中…" : "保存"}
-              </button>
-            </div>
+            ))}
+          </div>
+          {!draft && (
+            <button
+              className="ws-icon-button"
+              disabled={boards.length <= 1}
+              onClick={deleteBoard}
+              aria-label="删除面板"
+            >
+              <Trash2 size={15} />
+            </button>
           )}
-          <section
-            className={`ws-grid ${draft ? "ws-editing" : ""}`}
-            aria-label="卡片"
-          >
-            {visible.map((w) => {
-              const r = resourceMap.get(w.resourceId);
-              const Icon =
-                w.type === "resource" && r
-                  ? resourceMeta[r.kind].icon
-                  : templateIcons[w.type];
-              const index = current.widgets.findIndex((c) => c.id === w.id);
-              return (
-                <article
-                  key={w.id}
-                  data-widget-id={w.id}
-                  className={`ws-card ws-size-${w.size} ${dragging === w.id ? "ws-dragging" : ""} ${dropId === w.id ? "ws-drop" : ""}`}
-                  onDragOver={(e) => {
-                    if (draft && dragId.current) {
-                      e.preventDefault();
-                      setDropId(w.id);
-                    }
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    if (draft && dragId.current)
-                      change({
-                        ...draft,
-                        widgets: moveWidget(
-                          draft.widgets,
-                          dragId.current,
-                          index,
-                        ),
-                      });
-                    dragId.current = null;
-                    setDragging(null);
-                    setDropId(null);
-                  }}
-                >
-                  {draft && (
-                    <div className="ws-card-edit">
-                      <button
-                        className="ws-handle"
-                        draggable={!saving}
-                        aria-label={`移动 ${w.title || r?.name || widgetMeta[w.type].name}`}
-                        onDragStart={(e) => {
-                          dragId.current = w.id;
-                          e.dataTransfer.setData("text/plain", w.id);
-                          e.dataTransfer.effectAllowed = "move";
-                          setDragging(w.id);
-                        }}
-                        onDragEnd={() => {
-                          dragId.current = null;
-                          setDragging(null);
-                          setDropId(null);
-                        }}
-                      >
-                        <GripVertical size={16} />
-                      </button>
-                      <button
-                        aria-label="前移卡片"
-                        disabled={index === 0 || saving}
-                        onClick={() =>
-                          change({
-                            ...draft,
-                            widgets: moveWidget(draft.widgets, w.id, index - 1),
-                          })
-                        }
-                      >
-                        <ArrowUp size={14} />
-                      </button>
-                      <button
-                        aria-label="后移卡片"
-                        disabled={index === draft.widgets.length - 1 || saving}
-                        onClick={() =>
-                          change({
-                            ...draft,
-                            widgets: moveWidget(draft.widgets, w.id, index + 1),
-                          })
-                        }
-                      >
-                        <ArrowDown size={14} />
-                      </button>
-                      <select
-                        aria-label="卡片尺寸"
-                        value={w.size}
-                        disabled={saving}
-                        onChange={(e) =>
-                          change({
-                            ...draft,
-                            widgets: draft.widgets.map((c) =>
-                              c.id === w.id
-                                ? {
-                                    ...c,
-                                    size: e.target.value as Widget["size"],
-                                  }
-                                : c,
-                            ),
-                          })
-                        }
-                      >
-                        <option value="small">小</option>
-                        <option value="medium">中</option>
-                        <option value="wide">宽</option>
-                        <option value="full">整行</option>
-                      </select>
-                      <button
-                        aria-label="配置卡片"
-                        onClick={() => editWidget(w)}
-                        disabled={saving}
-                      >
-                        <Settings size={14} />
-                      </button>
-                      <button
-                        aria-label="移除卡片"
-                        onClick={() =>
-                          change({
-                            ...draft,
-                            widgets: draft.widgets.filter((c) => c.id !== w.id),
-                          })
-                        }
-                        disabled={saving}
-                      >
-                        <X size={15} />
-                      </button>
-                    </div>
-                  )}
-                  <div className="ws-cardhead">
-                    <span className="ws-cardicon">
-                      <Icon size={18} />
-                    </span>
-                    <div>
-                      <h2>{w.title || r?.name || widgetMeta[w.type].name}</h2>
-                      <small>
-                        {r
-                          ? resourceMeta[r.kind].name
-                          : w.type === "timeseries"
-                            ? `${hours} 小时`
-                            : widgetMeta[w.type].name}
-                      </small>
-                    </div>
-                    {!draft && (
-                      <button
-                        className="ws-icon-button"
-                        aria-label={`查看 ${w.title || r?.name || widgetMeta[w.type].name}`}
-                        onClick={() => {
-                          if (w.type === "events") setEventOpen(true);
-                          else if (r) setDetail(r);
-                          else {
-                            begin();
-                            editWidget(w);
-                          }
-                        }}
-                      >
-                        <MoreHorizontal size={18} />
-                      </button>
-                    )}
-                  </div>
-                  {renderContent(w)}
-                </article>
-              );
-            })}
-          </section>
-          {!visible.length && (
-            <div className="ws-board-empty">
-              <LayoutGrid size={30} />
-              <h2>{query ? "没有匹配的卡片" : "还没有卡片"}</h2>
-              <button className="ws-primary" onClick={openGallery}>
-                添加卡片
-              </button>
-            </div>
-          )}
-        </main>
-        <Dialog
-          open={gallery}
-          onOpenChange={(open) => {
-            setGallery(open);
-            if (!open) setConfigure(null);
-          }}
+        </div>
+        {draft && (
+          <div className="ws-editbar">
+            <input
+              aria-label="面板名称"
+              maxLength={40}
+              value={draft.name}
+              onChange={(e) => change({ ...draft, name: e.target.value })}
+            />
+            <button
+              aria-label="撤销"
+              disabled={!past.length || saving}
+              onClick={() => {
+                setFuture((f) => [draft, ...f]);
+                setDraft(past[past.length - 1]);
+                setPast((p) => p.slice(0, -1));
+              }}
+            >
+              <Undo2 size={16} />
+            </button>
+            <button
+              aria-label="重做"
+              disabled={!future.length || saving}
+              onClick={() => {
+                setPast((p) => [...p, draft]);
+                setDraft(future[0]);
+                setFuture((f) => f.slice(1));
+              }}
+            >
+              <Redo2 size={16} />
+            </button>
+            <span className="ws-spacer" />
+            <button onClick={cancel} disabled={saving}>
+              取消
+            </button>
+            <button
+              className="ws-primary"
+              onClick={save}
+              disabled={saving || !draft.name.trim()}
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        )}
+        <section
+          className={`ws-grid ${draft ? "ws-editing" : ""}`}
+          aria-label="卡片"
         >
-          <DialogContent className={`ws-dialog ws-${preferences.theme}`}>
-            <DialogHeader>
-              <DialogTitle>
-                {configure
-                  ? current.widgets.some((w) => w.id === configure.id)
-                    ? "配置卡片"
-                    : widgetMeta[selected].name
-                  : "添加卡片"}
-              </DialogTitle>
-              <DialogDescription>
-                {configure ? "选择内容与显示方式。" : "选择卡片类型。"}
-              </DialogDescription>
-            </DialogHeader>
-            {!configure ? (
-              <div className="ws-templates">
-                {widgetTypes.map((type) => {
-                  const Icon = templateIcons[type];
-                  return (
-                    <button key={type} onClick={() => choose(type)}>
-                      <Icon size={22} />
-                      <strong>{widgetMeta[type].name}</strong>
-                      <small>{widgetMeta[type].description}</small>
-                      <Plus size={15} />
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  addWidget();
+          {visible.map((w) => {
+            const r = resourceMap.get(w.resourceId);
+            const Icon =
+              w.type === "resource" && r
+                ? resourceMeta[r.kind].icon
+                : templateIcons[w.type];
+            const index = current.widgets.findIndex((c) => c.id === w.id);
+            return (
+              <article
+                key={w.id}
+                data-widget-id={w.id}
+                className={`ws-card ws-size-${w.size} ${dragging === w.id ? "ws-dragging" : ""} ${dropId === w.id ? "ws-drop" : ""}`}
+                onDragOver={(e) => {
+                  if (draft && dragId.current) {
+                    e.preventDefault();
+                    setDropId(w.id);
+                  }
                 }}
-                className="ws-config"
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (draft && dragId.current)
+                    change({
+                      ...draft,
+                      widgets: moveWidget(draft.widgets, dragId.current, index),
+                    });
+                  dragId.current = null;
+                  setDragging(null);
+                  setDropId(null);
+                }}
               >
-                <label>
-                  标题
-                  <input
-                    maxLength={80}
-                    value={configure.title}
-                    onChange={(e) =>
-                      setConfigure({ ...configure, title: e.target.value })
-                    }
-                    placeholder="使用资源名称"
-                  />
-                </label>
-                {["resource", "metric", "timeseries"].includes(
-                  configure.type,
-                ) && (
-                  <label>
-                    资源
-                    <select
-                      required
-                      value={configure.resourceId}
-                      onChange={(e) =>
-                        setConfigure({
-                          ...configure,
-                          resourceId: e.target.value,
+                {draft && (
+                  <div className="ws-card-edit">
+                    <button
+                      className="ws-handle"
+                      draggable={!saving}
+                      aria-label={`移动 ${w.title || r?.name || widgetMeta[w.type].name}`}
+                      onDragStart={(e) => {
+                        dragId.current = w.id;
+                        e.dataTransfer.setData("text/plain", w.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragging(w.id);
+                      }}
+                      onDragEnd={() => {
+                        dragId.current = null;
+                        setDragging(null);
+                        setDropId(null);
+                      }}
+                    >
+                      <GripVertical size={16} />
+                    </button>
+                    <button
+                      aria-label="前移卡片"
+                      disabled={index === 0 || saving}
+                      onClick={() =>
+                        change({
+                          ...draft,
+                          widgets: moveWidget(draft.widgets, w.id, index - 1),
                         })
                       }
                     >
-                      <option value="">选择资源</option>
-                      {resources
-                        .filter(
-                          (r) =>
-                            configure.type === "resource" ||
-                            r.kind === "server",
-                        )
-                        .map((r) => (
-                          <option value={r.id} key={r.id}>
-                            {r.name} · {resourceMeta[r.kind].name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                )}
-                {["metric", "timeseries"].includes(configure.type) && (
-                  <>
-                    <label>
-                      指标
-                      <select
-                        value={configure.metric}
-                        onChange={(e) =>
-                          setConfigure({
-                            ...configure,
-                            metric: e.target.value as MetricKey,
-                          })
-                        }
-                      >
-                        {(Object.keys(metricLabels) as MetricKey[]).map((k) => (
-                          <option key={k} value={k}>
-                            {metricLabels[k]}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      显示阈值（%）
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        required
-                        value={configure.threshold}
-                        onChange={(e) =>
-                          setConfigure({
-                            ...configure,
-                            threshold: Number(e.target.value),
-                          })
-                        }
-                      />
-                    </label>
-                  </>
-                )}
-                {configure.type === "note" && (
-                  <label>
-                    内容
-                    <textarea
-                      rows={7}
-                      maxLength={4000}
-                      value={configure.text}
-                      onChange={(e) =>
-                        setConfigure({ ...configure, text: e.target.value })
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      aria-label="后移卡片"
+                      disabled={index === draft.widgets.length - 1 || saving}
+                      onClick={() =>
+                        change({
+                          ...draft,
+                          widgets: moveWidget(draft.widgets, w.id, index + 1),
+                        })
                       }
-                    />
-                  </label>
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                    <select
+                      aria-label="卡片尺寸"
+                      value={w.size}
+                      disabled={saving}
+                      onChange={(e) =>
+                        change({
+                          ...draft,
+                          widgets: draft.widgets.map((c) =>
+                            c.id === w.id
+                              ? {
+                                  ...c,
+                                  size: e.target.value as Widget["size"],
+                                }
+                              : c,
+                          ),
+                        })
+                      }
+                    >
+                      <option value="small">小</option>
+                      <option value="medium">中</option>
+                      <option value="wide">宽</option>
+                      <option value="full">整行</option>
+                    </select>
+                    <button
+                      aria-label="配置卡片"
+                      onClick={() => editWidget(w)}
+                      disabled={saving}
+                    >
+                      <Settings size={14} />
+                    </button>
+                    <button
+                      aria-label="移除卡片"
+                      onClick={() =>
+                        change({
+                          ...draft,
+                          widgets: draft.widgets.filter((c) => c.id !== w.id),
+                        })
+                      }
+                      disabled={saving}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
                 )}
+                <div className="ws-cardhead">
+                  <span className="ws-cardicon">
+                    <Icon size={18} />
+                  </span>
+                  <div>
+                    <h2>{w.title || r?.name || widgetMeta[w.type].name}</h2>
+                    <small>
+                      {r
+                        ? resourceMeta[r.kind].name
+                        : w.type === "timeseries"
+                          ? `${hours} 小时`
+                          : widgetMeta[w.type].name}
+                    </small>
+                  </div>
+                  {!draft && (
+                    <button
+                      className="ws-icon-button"
+                      aria-label={`查看 ${w.title || r?.name || widgetMeta[w.type].name}`}
+                      onClick={() => {
+                        if (w.type === "events") setEventOpen(true);
+                        else if (r) setDetail(r);
+                        else {
+                          begin();
+                          editWidget(w);
+                        }
+                      }}
+                    >
+                      <MoreHorizontal size={18} />
+                    </button>
+                  )}
+                </div>
+                {renderContent(w)}
+              </article>
+            );
+          })}
+        </section>
+        {!visible.length && (
+          <div className="ws-board-empty">
+            <LayoutGrid size={30} />
+            <h2>{query ? "没有匹配的卡片" : "还没有卡片"}</h2>
+            <button className="ws-primary" onClick={openGallery}>
+              添加卡片
+            </button>
+          </div>
+        )}
+      </ConsoleShell>
+      <Dialog
+        open={gallery}
+        onOpenChange={(open) => {
+          setGallery(open);
+          if (!open) setConfigure(null);
+        }}
+      >
+        <DialogContent className={dialogTheme(preferences)}>
+          <DialogHeader>
+            <DialogTitle>
+              {configure
+                ? current.widgets.some((w) => w.id === configure.id)
+                  ? "配置卡片"
+                  : widgetMeta[selected].name
+                : "添加卡片"}
+            </DialogTitle>
+            <DialogDescription>
+              {configure ? "选择内容与显示方式。" : "选择卡片类型。"}
+            </DialogDescription>
+          </DialogHeader>
+          {!configure ? (
+            <div className="ws-templates">
+              {widgetTypes.map((type) => {
+                const Icon = templateIcons[type];
+                return (
+                  <button key={type} onClick={() => choose(type)}>
+                    <Icon size={22} />
+                    <strong>{widgetMeta[type].name}</strong>
+                    <small>{widgetMeta[type].description}</small>
+                    <Plus size={15} />
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                addWidget();
+              }}
+              className="ws-config"
+            >
+              <label>
+                标题
+                <input
+                  maxLength={80}
+                  value={configure.title}
+                  onChange={(e) =>
+                    setConfigure({ ...configure, title: e.target.value })
+                  }
+                  placeholder="使用资源名称"
+                />
+              </label>
+              {["resource", "metric", "timeseries"].includes(
+                configure.type,
+              ) && (
                 <label>
-                  尺寸
+                  资源
                   <select
-                    value={configure.size}
+                    required
+                    value={configure.resourceId}
                     onChange={(e) =>
                       setConfigure({
                         ...configure,
-                        size: e.target.value as Widget["size"],
+                        resourceId: e.target.value,
                       })
                     }
                   >
-                    <option value="small">小</option>
-                    <option value="medium">中</option>
-                    <option value="wide">宽</option>
-                    <option value="full">整行</option>
+                    <option value="">选择资源</option>
+                    {resources
+                      .filter(
+                        (r) =>
+                          configure.type === "resource" || r.kind === "server",
+                      )
+                      .map((r) => (
+                        <option value={r.id} key={r.id}>
+                          {r.name} · {resourceMeta[r.kind].name}
+                        </option>
+                      ))}
                   </select>
                 </label>
-                <div className="ws-actions">
-                  <button type="button" onClick={() => setConfigure(null)}>
-                    返回
-                  </button>
+              )}
+              {["resource", "metric", "timeseries"].includes(
+                configure.type,
+              ) && (
+                <button type="button" onClick={() => setResourceEditor(null)}>
+                  新建资源
+                </button>
+              )}
+              {["metric", "timeseries"].includes(configure.type) && (
+                <>
+                  <label>
+                    指标
+                    <select
+                      value={configure.metric}
+                      onChange={(e) =>
+                        setConfigure({
+                          ...configure,
+                          metric: e.target.value as MetricKey,
+                        })
+                      }
+                    >
+                      {(Object.keys(metricLabels) as MetricKey[]).map((k) => (
+                        <option key={k} value={k}>
+                          {metricLabels[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    显示阈值（%）
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      required
+                      value={configure.threshold}
+                      onChange={(e) =>
+                        setConfigure({
+                          ...configure,
+                          threshold: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                </>
+              )}
+              {configure.type === "note" && (
+                <label>
+                  内容
+                  <textarea
+                    rows={7}
+                    maxLength={4000}
+                    value={configure.text}
+                    onChange={(e) =>
+                      setConfigure({ ...configure, text: e.target.value })
+                    }
+                  />
+                </label>
+              )}
+              <label>
+                尺寸
+                <select
+                  value={configure.size}
+                  onChange={(e) =>
+                    setConfigure({
+                      ...configure,
+                      size: e.target.value as Widget["size"],
+                    })
+                  }
+                >
+                  <option value="small">小</option>
+                  <option value="medium">中</option>
+                  <option value="wide">宽</option>
+                  <option value="full">整行</option>
+                </select>
+              </label>
+              <div className="ws-actions">
+                <button type="button" onClick={() => setConfigure(null)}>
+                  返回
+                </button>
+                <button className="ws-primary" disabled={saving} type="submit">
+                  确定
+                </button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={boardDialog} onOpenChange={setBoardDialog}>
+        <DialogContent className={dialogTheme(preferences)}>
+          <DialogHeader>
+            <DialogTitle>新建面板</DialogTitle>
+            <DialogDescription>面板名称</DialogDescription>
+          </DialogHeader>
+          <form
+            className="ws-config"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void createBoard();
+            }}
+          >
+            <input
+              aria-label="新面板名称"
+              required
+              maxLength={40}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <button className="ws-primary" disabled={saving || !newName.trim()}>
+              创建
+            </button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={eventOpen} onOpenChange={setEventOpen}>
+        <DialogContent className={dialogTheme(preferences)}>
+          <DialogHeader>
+            <DialogTitle>事件</DialogTitle>
+            <DialogDescription>
+              采集连接连续失败 3 次，或指标超过 90% 持续 5 分钟时记录事件。
+            </DialogDescription>
+          </DialogHeader>
+          {eventsList(observation?.events || [])}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={connections} onOpenChange={setConnections}>
+        <DialogContent className={dialogTheme(preferences)}>
+          <DialogHeader>
+            <DialogTitle>数据连接</DialogTitle>
+            <DialogDescription>
+              SMA 每 30 秒采集，历史保留 7 天。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="ws-connections">
+            {resources
+              .filter((r) => r.kind === "server")
+              .map((r) => (
+                <div key={r.id}>
+                  <Server size={17} />
+                  <div>
+                    <strong>{r.name}</strong>
+                    <small>{status(r).label}</small>
+                  </div>
                   <button
-                    className="ws-primary"
-                    disabled={saving}
-                    type="submit"
+                    className="ws-text-link"
+                    onClick={() => {
+                      setConnections(false);
+                      setResourceEditor(r);
+                    }}
                   >
-                    确定
+                    配置 <ArrowUpRight size={12} />
                   </button>
                 </div>
-              </form>
+              ))}
+            {!resources.some((r) => r.kind === "server") && (
+              <p>尚未配置服务器。</p>
             )}
-          </DialogContent>
-        </Dialog>
-        <Dialog open={boardDialog} onOpenChange={setBoardDialog}>
-          <DialogContent className={`ws-dialog ws-${preferences.theme}`}>
-            <DialogHeader>
-              <DialogTitle>新建面板</DialogTitle>
-              <DialogDescription>面板名称</DialogDescription>
-            </DialogHeader>
-            <form
-              className="ws-config"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void createBoard();
+            <p>
+              数据库与中间件目前支持资源卡片。性能指标连接器、站点探测、日志与链路尚未接入。
+            </p>
+            <button
+              className="ws-text-link"
+              onClick={() => {
+                setConnections(false);
+                setResourceOpen(true);
               }}
             >
-              <input
-                aria-label="新面板名称"
-                required
-                maxLength={40}
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-              <button
-                className="ws-primary"
-                disabled={saving || !newName.trim()}
-              >
-                创建
-              </button>
-            </form>
-          </DialogContent>
-        </Dialog>
-        <Dialog open={eventOpen} onOpenChange={setEventOpen}>
-          <DialogContent className={`ws-dialog ws-${preferences.theme}`}>
-            <DialogHeader>
-              <DialogTitle>事件</DialogTitle>
-              <DialogDescription>
-                采集连接连续失败 3 次，或指标超过 90% 持续 5 分钟时记录事件。
-              </DialogDescription>
-            </DialogHeader>
-            {eventsList(observation?.events || [])}
-          </DialogContent>
-        </Dialog>
-        <Dialog open={connections} onOpenChange={setConnections}>
-          <DialogContent className={`ws-dialog ws-${preferences.theme}`}>
-            <DialogHeader>
-              <DialogTitle>数据连接</DialogTitle>
-              <DialogDescription>
-                SMA 每 30 秒采集，历史保留 7 天。
-              </DialogDescription>
-            </DialogHeader>
-            <div className="ws-connections">
-              {resources
-                .filter((r) => r.kind === "server")
-                .map((r) => (
-                  <div key={r.id}>
-                    <Server size={17} />
-                    <div>
-                      <strong>{r.name}</strong>
-                      <small>{status(r).label}</small>
-                    </div>
-                    <a href="/resources">
-                      配置 <ArrowUpRight size={12} />
-                    </a>
+              管理资源 <ArrowUpRight size={13} />
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!detail}
+        onOpenChange={(open) => {
+          if (!open) setDetail(null);
+        }}
+      >
+        <DialogContent className={dialogTheme(preferences)}>
+          <DialogHeader>
+            <DialogTitle>{detail?.name}</DialogTitle>
+            <DialogDescription>
+              {detail && resourceMeta[detail.kind].name}
+            </DialogDescription>
+          </DialogHeader>
+          {detail && (
+            <>
+              <div className={`ws-state ${status(detail).className}`}>
+                <span className="ws-dot" />
+                {status(detail).label}
+              </div>
+              <p>{detail.description}</p>
+              {detail.kind === "server" && (
+                <>
+                  <div className="ws-metrics">
+                    {(Object.keys(metricLabels) as MetricKey[]).map((k) => (
+                      <div key={k}>
+                        <small>{metricLabels[k]}</small>
+                        <strong>{metricValue(value(detail, k))}</strong>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              {!resources.some((r) => r.kind === "server") && (
-                <p>尚未配置服务器。</p>
+                  <History
+                    points={
+                      series[`${hours}:${detail.id}:cpuPercent`]?.points || []
+                    }
+                    failed={series[`${hours}:${detail.id}:cpuPercent`]?.error}
+                    pending={!series[`${hours}:${detail.id}:cpuPercent`]}
+                    label="CPU"
+                  />
+                </>
               )}
-              <p>
-                数据库与中间件目前支持资源卡片。性能指标连接器、站点探测、日志与链路尚未接入。
-              </p>
-              <a className="ws-text-link" href="/resources">
-                管理资源 <ArrowUpRight size={13} />
-              </a>
-            </div>
-          </DialogContent>
-        </Dialog>
-        <Dialog
-          open={!!detail}
-          onOpenChange={(open) => {
-            if (!open) setDetail(null);
-          }}
-        >
-          <DialogContent className={`ws-dialog ws-${preferences.theme}`}>
-            <DialogHeader>
-              <DialogTitle>{detail?.name}</DialogTitle>
-              <DialogDescription>
-                {detail && resourceMeta[detail.kind].name}
-              </DialogDescription>
-            </DialogHeader>
-            {detail && (
-              <>
-                <div className={`ws-state ${status(detail).className}`}>
-                  <span className="ws-dot" />
-                  {status(detail).label}
+              {detail.kind === "server" && detail.agentUrl && (
+                <ServerMetrics resourceId={detail.id} />
+              )}
+              <dl className="ws-detail-list">
+                <div>
+                  <dt>最近采样</dt>
+                  <dd>
+                    {samples.has(detail.id)
+                      ? dateTime(samples.get(detail.id)!.timestamp)
+                      : "—"}
+                  </dd>
                 </div>
-                <p>{detail.description}</p>
-                {detail.kind === "server" && (
-                  <>
-                    <div className="ws-metrics">
-                      {(Object.keys(metricLabels) as MetricKey[]).map((k) => (
-                        <div key={k}>
-                          <small>{metricLabels[k]}</small>
-                          <strong>{metricValue(value(detail, k))}</strong>
-                        </div>
-                      ))}
-                    </div>
-                    <History
-                      points={
-                        series[`${hours}:${detail.id}:cpuPercent`]?.points || []
-                      }
-                      failed={series[`${hours}:${detail.id}:cpuPercent`]?.error}
-                      pending={!series[`${hours}:${detail.id}:cpuPercent`]}
-                      label="CPU"
-                    />
-                  </>
-                )}
-                <dl className="ws-detail-list">
-                  <div>
-                    <dt>最近采样</dt>
-                    <dd>
-                      {samples.has(detail.id)
-                        ? dateTime(samples.get(detail.id)!.timestamp)
-                        : "—"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>分类</dt>
-                    <dd>{detail.category}</dd>
-                  </div>
-                  <div>
-                    <dt>备注</dt>
-                    <dd>{detail.note || "—"}</dd>
-                  </div>
-                </dl>
-                <div className="ws-actions">
-                  <a href={detail.url} target="_blank" rel="noreferrer">
-                    打开 <ArrowUpRight size={14} />
+                <div>
+                  <dt>分类</dt>
+                  <dd>{detail.category}</dd>
+                </div>
+                <div>
+                  <dt>备注</dt>
+                  <dd>{detail.note || "—"}</dd>
+                </div>
+              </dl>
+              <div className="ws-actions">
+                <a href={detail.url} target="_blank" rel="noreferrer">
+                  打开 <ArrowUpRight size={14} />
+                </a>
+                {detail.kind === "server" && detail.agentUrl && (
+                  <a href={`/servers/${detail.id}`}>
+                    服务发现 <ArrowUpRight size={14} />
                   </a>
-                  {detail.kind === "server" && detail.agentUrl && (
-                    <a href={`/servers/${detail.id}`}>
-                      服务发现 <ArrowUpRight size={14} />
-                    </a>
-                  )}
-                  <a href="/resources">编辑资源</a>
-                </div>
-                {eventsList(
-                  (observation?.events || []).filter(
-                    (e) => e.resourceId === detail.id,
-                  ),
-                  true,
                 )}
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
-      </div>
+                <button
+                  className="ws-text-link"
+                  onClick={() => {
+                    setDetail(null);
+                    setResourceEditor(detail);
+                  }}
+                >
+                  编辑资源
+                </button>
+              </div>
+              {eventsList(
+                (observation?.events || []).filter(
+                  (e) => e.resourceId === detail.id,
+                ),
+                true,
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+      <ResourceManager
+        open={resourceOpen}
+        onOpenChange={setResourceOpen}
+        resources={resources}
+        preferences={preferences}
+        boards={boards}
+        onChange={setResources}
+        onInspect={setDetail}
+        onAdd={addResourceCard}
+      />
+      <ConsoleSettings
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        preferences={preferences}
+        onPreferencesChange={setPreferences}
+        onRestored={restored}
+        editing={!!draft}
+      />
+      {resourceEditor !== undefined && (
+        <ResourceEditor
+          key={resourceEditor?.id || "new"}
+          resource={resourceEditor}
+          preferences={preferences}
+          boards={boards}
+          onClose={() => setResourceEditor(undefined)}
+          onSaved={(r) => {
+            setResources((rs) =>
+              rs.some((item) => item.id === r.id)
+                ? rs.map((item) => (item.id === r.id ? r : item))
+                : [r, ...rs],
+            );
+            if (resourceEditor === null)
+              setConfigure((c) =>
+                c && (c.type === "resource" || r.kind === "server")
+                  ? { ...c, resourceId: r.id }
+                  : c,
+              );
+          }}
+          onDeleted={(id) =>
+            setResources((rs) => rs.filter((r) => r.id !== id))
+          }
+        />
+      )}
     </>
   );
 }
