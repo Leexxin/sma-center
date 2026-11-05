@@ -376,3 +376,6 @@ html[data-theme="light"] .color-options button.selected { border-color: #26332f;
   .discovery-main { padding: 18px 14px 58px; }.discovery-hero { min-height: 225px; padding: 25px 22px; }.discovery-hero h1 { font-size: 34px; }.hero-orbit { display: none; }.server-address { width: 100%; }
   .discovery-error { grid-template-columns: auto 1fr; }.discovery-error button { grid-column: 1 / -1; }.capability-card, .run-card { min-height: unset; padding: 18px; }.run-stage { margin-block: 40px 30px; }.asset-grid { grid-template-columns: 1fr; }.asset-section, .history-section { padding: 19px 16px; }.asset-head { align-items: flex-start; }.asset-head > div > p:not(.eyebrow) { display: none; }.history-list > button { grid-template-columns: auto 1fr auto; }.history-list > button > b { display: none; }
 }
+
+/* Resource management retains existing forms and credential flows. */
+.brand-mark img,.mobile-brand img{border-radius:10px}.workspace-back{display:block;padding:9px 12px;font-size:13px;color:var(--tone);text-decoration:none}.brand-mark strong{letter-spacing:0}.brand-mark small{letter-spacing:0;font-family:inherit;transform:none;font-size:11px}.library-section .filter-tabs{flex-wrap:wrap;height:auto}.favorites-section .section-head p:empty{display:none}

@@ -8,7 +8,7 @@ export function parseResourceInput(value: unknown): ParsedResourceInput {
   const status = String(body?.status ?? "unknown") as ResourceStatus;
   const name = String(body?.name ?? "").trim();
   const url = String(body?.url ?? "").trim();
-  if (!name || !url || !["tool", "site", "server"].includes(kind) || !["online", "warning", "offline", "unknown"].includes(status)) {
+  if (!name || !url || !["tool", "site", "server", "database", "middleware"].includes(kind) || !["online", "warning", "offline", "unknown"].includes(status)) {
     throw new Error("INVALID_INPUT");
   }
   try {

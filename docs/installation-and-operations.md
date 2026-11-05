@@ -152,6 +152,9 @@ curl -fsS http://192.168.33.124:8080/healthz
 
 ## 7. 面板与 SMA 日常配置
 
+首页现为可编辑面板，原资源与配置管理位于 `/resources`；多面板、卡片类型、后台采样、历史与事件规则详见 [面板与卡片](workspace.md)。原资源 ID、Token、SSO 与验证器不变。生产单进程默认每 30 秒后台采集已配置 SMA 的服务器（最多 100 个），保留 7 天历史；可设 `SMA_CENTER_MONITOR_ENABLED=false` 后重启关闭，开发模式默认关闭。不要同时运行多个采样进程。
+
+
 - 添加工具、站点和服务器资源，填写名称、地址、分类等实际字段；资源可点亮星标收藏并在顶部展示。
 - 子页直接显示对应资源集合，可用分类快速筛选；主页、主题、菜单收缩/排序等状态通过页面设置维护。
 - 在服务器资源中配置 SMA 服务地址及其 Bearer Token。主机地址和 SMA API 地址是不同概念，按 SMA 实际监听端口填写；不得把面板的 8080 当成所有 SMA 的端口。
@@ -173,6 +176,7 @@ SMA Release 与文件服务器同步入口为侧栏“SMA 版本中心”（`/sm
 | SMA_CENTER_SECURE_COOKIES | true 时 Cookie 增加 Secure；HTTP 下不要启用，HTTPS 限制见第 12 节 |
 | SMA_CENTER_SSO_ISSUER | 可选固定外部 origin，启用受限 OIDC；支持 HTTP IP（本次为 http://192.168.33.124:8080）与 HTTPS，详见 [SSO 手册](sso-integration.md) |
 | SMA_CENTER_SSO_CLIENTS_FILE | 默认数据目录 oidc-clients.json；客户端注册表，变更实时读取 |
+| SMA_CENTER_MONITOR_ENABLED | 默认生产启用持续 SMA 采样；设 false 后重启关闭，不删除历史 |
 | NEXT_TELEMETRY_DISABLED | 镜像和脚本关闭 Next 遥测 |
 | NODE_OPTIONS | 镜像构建限制 Node 堆为 1536 MiB，不等于容器总内存上限 |
 | SMA_CENTER_GITHUB_TOKEN | 可选服务端 GitHub API 凭据，仅用于版本中心元数据请求，禁止提交 Git |
@@ -187,6 +191,8 @@ SMA_CREDENTIAL_KEY 由网关从 secrets.json 注入，不能随意设置一个�
 - `setup-code.txt`：仅未绑定或重置后存在的一次性绑定授权码。
 - `oidc-clients.json`、`oidc-signing-key.pem`：启用 SSO 后的客户端注册表和签名私钥；临时 `.secret` 交付文件用后删除。卷外注册表需单独备份。
 - `release-sync.json`：版本中心的加密分享配置、核对结果及任务记录，整卷备份包含，页面 JSON 备份不包含。
+
+新增 dashboards、monitor_samples、monitor_events 表随整卷备份；页面 JSON 备份包含面板，排除指标历史与事件，兼容旧格式的具体行为见 [面板与卡片](workspace.md)。
 
 SQLite 启动时自动应用 `drizzle/` 中迁移；旧 atlas 数据文件/迁移记录有兼容迁移逻辑。历史内部存储标识和加密上下文不可随意改名。不要手工删用户字段、迁移记录或单独替换密钥。迁移不是自动可逆的，升级前必须备份。
 
@@ -405,7 +411,7 @@ SMA_CENTER_BROWSER_TEST=1 npm test
 
 发布验收：容器健康、实际入口可达、未认证被拦截、原验证器可登录、旧数据保留、资源/收藏/主题可保存、SMA 可连接、备份可读、部署源码与发布版本一致。恢复和破坏性测试只在隔离副本验证。
 
-当前未实现/未配置：多用户/多租户、密码登录、自动 Git 同步部署、定时异地备份及清理、持续监控告警、生产 HTTPS 反向代理验收。后续新增能力必须修改本节及维护约定中的相关操作说明。
+当前未实现/未配置：多用户/多租户、密码登录、自动 Git 同步部署、定时异地备份及清理、数据库/中间件性能连接器、日志链路、告警外部通知、多进程采样、生产 HTTPS 反向代理验收。后续新增能力必须修改本节及维护约定中的相关操作说明。
 
 ## 15. 当前 HTTP IP SSO 部署
 
