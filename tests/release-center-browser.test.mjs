@@ -60,6 +60,17 @@ test('release UI keeps browsing available during sync, renders live bytes and re
     await call('Fetch.enable', { patterns: [{ urlPattern: '*api/sma/releases*', requestStage: 'Request' }] });
     await call('Page.navigate', { url: origin + '/sma/releases' });
     await until("document.body.textContent.includes('秒无字节进展')");
+    assert.equal(await evaluate("document.querySelectorAll('.ws-sidebar').length"), 1);
+    assert.equal(await evaluate("!!document.querySelector('.release-topbar')"), false);
+    for (const width of [1440, 768, 390]) {
+      await call('Emulation.setDeviceMetricsOverride', {width, height:1000,deviceScaleFactor:1,mobile:width===390});
+      assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'), true, 'release width '+width);
+      if (process.env.SMA_CENTER_CONSOLE_SCREENSHOTS) {
+        const shot = await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
+        writeFileSync(join(process.env.SMA_CENTER_CONSOLE_SCREENSHOTS,'releases-'+width+'.png'),Buffer.from(shot.data,'base64'));
+      }
+    }
+    await call('Emulation.setDeviceMetricsOverride', {width:1440,height:1000,deviceScaleFactor:1,mobile:false});
     assert.equal(await evaluate("document.querySelector('.release-versions button:nth-of-type(2)').disabled"), false);
     assert.equal(await evaluate("[...document.querySelectorAll('.release-actions button')].every(b => b.disabled)"), true);
     await evaluate("document.querySelector('.release-versions button:nth-of-type(2)').click()");

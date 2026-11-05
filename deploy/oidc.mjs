@@ -1,3 +1,4 @@
+import { nativePage } from './console-pages.mjs';
 // Restricted OIDC profile: confidential web clients, code + S256, single TOTP owner.
 import { createHash, randomBytes, timingSafeEqual, generateKeyPairSync, createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -61,7 +62,7 @@ export class OidcProvider {
     const data = encode({ alg: 'RS256', kid: this.kid, typ: 'JWT' }) + '.' + encode(payload);
     return data + '.' + sign('RSA-SHA256', Buffer.from(data), this.key).toString('base64url');
   }
-  async handle(request, response, url, session, { form, html, redirect, reply, validOrigin }) {
+  async handle(request, response, url, session, { form, html, redirect, reply, validOrigin, presentation = {} }) {
     if (!['/.well-known/openid-configuration', '/applications'].includes(url.pathname) && !url.pathname.startsWith('/oidc/')) return false;
     this.sweep();
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -76,7 +77,7 @@ export class OidcProvider {
     if (url.pathname === '/applications') {
       if (!isGet) return error(405, 'invalid_request');
       if (!session) { redirect('/login'); return true; }
-      html(200, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>业务应用 · sma-center</title><body><main><h1>业务应用</h1><p>选择业务系统，通过统一身份登录。系统内部权限由各应用管理。</p><ul>${clients.map(c => `<li><a href="${escape(c.entry_url)}" rel="noreferrer">${escape(c.name)}</a></li>`).join('') || '<li>尚未注册业务应用，请参阅 SSO 接入文档。</li>'}</ul><a href="/">返回工作台</a></main></body></html>`); return true;
+      html(200, nativePage('业务应用','已注册的统一登录应用。',`<div class="ui-app-grid">${clients.map(c => `<a class="ui-app-link" href="${escape(c.entry_url)}" rel="noreferrer"><span>↗</span>${escape(c.name)}</a>`).join('') || '<p>尚未注册业务应用。</p>'}</div>`,{...presentation,authenticated:true,current:'applications'})); return true;
     }
     if (url.pathname === '/oidc/authorize') {
       if (!isGet) return error(405, 'invalid_request');
@@ -107,7 +108,7 @@ export class OidcProvider {
       const ticket = opaque();
       this.store(this.pending, hash(ticket), { params: p.toString(), clientId: client.client_id, generation: this.auth.state.generation, sessionHash: hash(request.headers.cookie || ''), expires: Math.min(session.expires, this.now() + 300000) });
       response.setHeader('Referrer-Policy', 'same-origin');
-      html(200, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>确认登录 · sma-center</title><body><main><h1>登录 ${escape(client.name)}</h1><p>将向此应用提供你的固定身份标识${scopes.includes('profile') ? '和显示名称' : ''}。</p><p>回调地址：${escape(p.get('redirect_uri'))}</p><form method="post" action="/oidc/consent"><input type="hidden" name="ticket" value="${ticket}"><button name="decision" value="allow">确认登录</button><button name="decision" value="deny">取消</button></form></main></body></html>`, "'self' " + new URL(p.get('redirect_uri')).origin); return true;
+      html(200, nativePage(`登录 ${client.name}`,'确认向此应用提供身份信息。',`<p>将提供固定身份标识${scopes.includes('profile') ? '和显示名称' : ''}。</p><p>回调地址</p><div class="ui-consent-target">${escape(p.get('redirect_uri'))}</div><form method="post" action="/oidc/consent"><input type="hidden" name="ticket" value="${ticket}"><div class="ui-consent-actions"><button name="decision" value="allow">确认登录</button><button class="secondary" name="decision" value="deny">取消</button></div></form>`,{...presentation,authenticated:true,current:'applications'}), "'self' " + new URL(p.get('redirect_uri')).origin); return true;
     }
     if (url.pathname === '/oidc/consent') {
       if (request.method !== 'POST') return error(405, 'invalid_request');

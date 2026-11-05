@@ -1,62 +1,265 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, ArrowUpRight, Check, Copy, Download, GitBranch, Package, RefreshCw, ShieldCheck, Terminal, TriangleAlert } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Toaster } from '@/components/ui/sonner';
-import { toast } from 'sonner';
+import { useCallback, useEffect, useState } from "react";
+import ConsoleShell from "@/components/console/shell";
+import type { ConsoleContext } from "@/lib/console-context";
+import {
+  ArrowUpRight,
+  Check,
+  Copy,
+  Download,
+  GitBranch,
+  Package,
+  RefreshCw,
+  ShieldCheck,
+  Terminal,
+  TriangleAlert,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
-type Asset = { name: string; size: number; digest: string | null; url: string; status?: string };
-type Release = { tag: string; name: string; prerelease: boolean; publishedAt: string; url: string; body: string; assets: Asset[] };
-type TransferFile = { name: string; stage: string; failedStage?: string; bytes: number; total: number; rate: number; stalled: boolean; idleMs: number; sourceVerified?: boolean; targetVerified?: boolean; stages: Record<string, { elapsedMs?: number }> };
-type Job = { id: string; tag: string; kind: string; layout?: string; status: string; message: string; done: number; total: number; startedAt: string; files?: TransferFile[]; idleMs?: number };
-type State = { configured: boolean; targetOrigin: string | null; releases: Release[]; comparison: null | { id: string; tag: string; directory: string; folderExists: boolean; checkedAt: string; assets: Asset[]; extras: number }; job: Job | null; history: Job[] };
-type Commands = { tag: string; platform: string; documents: { path: string; source: string; error: string | null; groups: { title: string; language: string; command: string; dangerous: boolean }[] }[] };
-const labels: Record<string, string> = { missing: '缺失', aligned: 'SHA-256 一致', conflict: '内容冲突', unverified: '缺少摘要' };
-const size = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+type Asset = {
+  name: string;
+  size: number;
+  digest: string | null;
+  url: string;
+  status?: string;
+};
+type Release = {
+  tag: string;
+  name: string;
+  prerelease: boolean;
+  publishedAt: string;
+  url: string;
+  body: string;
+  assets: Asset[];
+};
+type TransferFile = {
+  name: string;
+  stage: string;
+  failedStage?: string;
+  bytes: number;
+  total: number;
+  rate: number;
+  stalled: boolean;
+  idleMs: number;
+  sourceVerified?: boolean;
+  targetVerified?: boolean;
+  stages: Record<string, { elapsedMs?: number }>;
+};
+type Job = {
+  id: string;
+  tag: string;
+  kind: string;
+  layout?: string;
+  status: string;
+  message: string;
+  done: number;
+  total: number;
+  startedAt: string;
+  files?: TransferFile[];
+  idleMs?: number;
+};
+type State = {
+  configured: boolean;
+  targetOrigin: string | null;
+  releases: Release[];
+  comparison: null | {
+    id: string;
+    tag: string;
+    directory: string;
+    folderExists: boolean;
+    checkedAt: string;
+    assets: Asset[];
+    extras: number;
+  };
+  job: Job | null;
+  history: Job[];
+};
+type Commands = {
+  tag: string;
+  platform: string;
+  documents: {
+    path: string;
+    source: string;
+    error: string | null;
+    groups: {
+      title: string;
+      language: string;
+      command: string;
+      dangerous: boolean;
+    }[];
+  }[];
+};
+const labels: Record<string, string> = {
+  missing: "缺失",
+  aligned: "SHA-256 一致",
+  conflict: "内容冲突",
+  unverified: "缺少摘要",
+};
+const size = (bytes: number) =>
+  bytes < 1024 * 1024
+    ? `${(bytes / 1024).toFixed(1)} KB`
+    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 async function request<T = State>(body?: object): Promise<T> {
-  const response = await fetch('/api/sma/releases', body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(70000) } : { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+  const response = await fetch(
+    "/api/sma/releases",
+    body
+      ? {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(70000),
+        }
+      : { cache: "no-store", signal: AbortSignal.timeout(10000) },
+  );
   const result = await response.json();
-  if (!response.ok) throw new Error((result as { error?: string })?.error || '操作失败');
+  if (!response.ok)
+    throw new Error((result as { error?: string })?.error || "操作失败");
   return result as T;
 }
 
-const stages: Record<string, string> = { compare: '核对镜像', download: '下载', verify: '校验源文件', upload: '上传', readback: '回读校验', completed: '已完成', failed: '失败', interrupted: '已停止' };
+const stages: Record<string, string> = {
+  compare: "核对镜像",
+  download: "下载",
+  verify: "校验源文件",
+  upload: "上传",
+  readback: "回读校验",
+  completed: "已完成",
+  failed: "失败",
+  interrupted: "已停止",
+};
 function JobProgress({ job, receivedAt }: { job: Job; receivedAt: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (job.status !== 'running') return;
+    if (job.status !== "running") return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [job.status]);
-  const stale = job.status === 'running' && now - receivedAt > 10000;
-  return <section className={`release-job ${job.status}`} aria-label="版本同步任务">
-    <div role="status" aria-live="polite"><strong>{job.tag} · {job.kind === 'sync' ? '同步' : '核对'}</strong><span>{({ running: '执行中', failed: '失败', completed: '已完成', interrupted: '已中断' } as Record<string, string>)[job.status]}</span></div>
-    <p>{job.message}</p>
-    <progress max={Math.max(job.total, 1)} value={job.done} aria-label="当前阶段文件完成数" />
-    <small>{job.done} / {job.total} · 当前阶段文件完成数，可继续浏览其他版本与文档</small>
-    {stale && <p role="status" className="release-transfer-warning">超过 10 秒未收到状态更新，正在重连；这不表示任务已停止。</p>}
-    {!stale && job.status === 'running' && (job.idleMs || 0) + Math.max(0, now - receivedAt) >= 15000 && !job.files?.some(file => !['completed', 'failed', 'interrupted'].includes(file.stage)) && <p className="release-transfer-warning" role="status">正在等待远端元数据或上传会话响应，超过 15 秒无阶段进展。</p>}
-    {job.files?.map(file => {
-      const active = job.status === 'running' && !['completed', 'failed', 'interrupted'].includes(file.stage);
-      const idle = file.idleMs + Math.max(0, now - receivedAt);
-      const stalled = active && idle >= 15000;
-      const rate = active && !stale && idle < 3000 ? file.rate : 0;
-      const duration = Object.values(file.stages).reduce((sum, stage) => sum + (stage.elapsedMs || 0), 0);
-      return <div className="release-transfer" key={file.name}>
-        <div><strong>{file.name}</strong><span>{stages[file.stage] || file.stage}{file.failedStage && ` · ${stages[file.failedStage] || file.failedStage}`}</span></div>
-        <progress max={Math.max(file.total, 1)} value={file.bytes} aria-label={`${file.name} ${stages[file.stage] || file.stage}字节进度`} />
-        <div className="release-transfer-metrics"><span>{size(file.bytes)} / {size(file.total)}</span><span>{active ? `${size(rate)} / s` : `累计阶段耗时 ${(duration / 1000).toFixed(1)} 秒`}</span></div>
-        <p>源 SHA-256：{file.sourceVerified ? '通过' : file.failedStage === 'verify' ? '失败' : '尚未通过'} · 镜像 SHA-256：{file.targetVerified ? '通过' : file.failedStage === 'readback' ? '未通过' : '尚未通过'}</p>
-        {file.stage === 'upload' && <small>已交给 HTTP 客户端的字节；仍需服务器确认与回读校验。</small>}
-        {stalled && !stale && <p className="release-transfer-warning" role="status">已 {Math.floor(idle / 1000)} 秒无字节进展，正在等待网络或服务器响应。</p>}
-        <details><summary>各阶段耗时</summary><p>{Object.entries(file.stages).map(([name, stage]) => `${stages[name] || name}：${stage.elapsedMs === undefined ? '进行中或未完成' : `${(stage.elapsedMs / 1000).toFixed(2)} 秒`}`).join(' · ')}</p></details>
-      </div>;
-    })}
-  </section>;
+  const stale = job.status === "running" && now - receivedAt > 10000;
+  return (
+    <section className={`release-job ${job.status}`} aria-label="版本同步任务">
+      <div role="status" aria-live="polite">
+        <strong>
+          {job.tag} · {job.kind === "sync" ? "同步" : "核对"}
+        </strong>
+        <span>
+          {
+            (
+              {
+                running: "执行中",
+                failed: "失败",
+                completed: "已完成",
+                interrupted: "已中断",
+              } as Record<string, string>
+            )[job.status]
+          }
+        </span>
+      </div>
+      <p>{job.message}</p>
+      <progress
+        max={Math.max(job.total, 1)}
+        value={job.done}
+        aria-label="当前阶段文件完成数"
+      />
+      <small>
+        {job.done} / {job.total} · 当前阶段文件完成数，可继续浏览其他版本与文档
+      </small>
+      {stale && (
+        <p role="status" className="release-transfer-warning">
+          超过 10 秒未收到状态更新，正在重连；这不表示任务已停止。
+        </p>
+      )}
+      {!stale &&
+        job.status === "running" &&
+        (job.idleMs || 0) + Math.max(0, now - receivedAt) >= 15000 &&
+        !job.files?.some(
+          (file) =>
+            !["completed", "failed", "interrupted"].includes(file.stage),
+        ) && (
+          <p className="release-transfer-warning" role="status">
+            正在等待远端元数据或上传会话响应，超过 15 秒无阶段进展。
+          </p>
+        )}
+      {job.files?.map((file) => {
+        const active =
+          job.status === "running" &&
+          !["completed", "failed", "interrupted"].includes(file.stage);
+        const idle = file.idleMs + Math.max(0, now - receivedAt);
+        const stalled = active && idle >= 15000;
+        const rate = active && !stale && idle < 3000 ? file.rate : 0;
+        const duration = Object.values(file.stages).reduce(
+          (sum, stage) => sum + (stage.elapsedMs || 0),
+          0,
+        );
+        return (
+          <div className="release-transfer" key={file.name}>
+            <div>
+              <strong>{file.name}</strong>
+              <span>
+                {stages[file.stage] || file.stage}
+                {file.failedStage &&
+                  ` · ${stages[file.failedStage] || file.failedStage}`}
+              </span>
+            </div>
+            <progress
+              max={Math.max(file.total, 1)}
+              value={file.bytes}
+              aria-label={`${file.name} ${stages[file.stage] || file.stage}字节进度`}
+            />
+            <div className="release-transfer-metrics">
+              <span>
+                {size(file.bytes)} / {size(file.total)}
+              </span>
+              <span>
+                {active
+                  ? `${size(rate)} / s`
+                  : `累计阶段耗时 ${(duration / 1000).toFixed(1)} 秒`}
+              </span>
+            </div>
+            <p>
+              源 SHA-256：
+              {file.sourceVerified
+                ? "通过"
+                : file.failedStage === "verify"
+                  ? "失败"
+                  : "尚未通过"}{" "}
+              · 镜像 SHA-256：
+              {file.targetVerified
+                ? "通过"
+                : file.failedStage === "readback"
+                  ? "未通过"
+                  : "尚未通过"}
+            </p>
+            {file.stage === "upload" && (
+              <small>
+                已交给 HTTP 客户端的字节；仍需服务器确认与回读校验。
+              </small>
+            )}
+            {stalled && !stale && (
+              <p className="release-transfer-warning" role="status">
+                已 {Math.floor(idle / 1000)}{" "}
+                秒无字节进展，正在等待网络或服务器响应。
+              </p>
+            )}
+            <details>
+              <summary>各阶段耗时</summary>
+              <p>
+                {Object.entries(file.stages)
+                  .map(
+                    ([name, stage]) =>
+                      `${stages[name] || name}：${stage.elapsedMs === undefined ? "进行中或未完成" : `${(stage.elapsedMs / 1000).toFixed(2)} 秒`}`,
+                  )
+                  .join(" · ")}
+              </p>
+            </details>
+          </div>
+        );
+      })}
+    </section>
+  );
 }
 
 function CommandBlock({ command }: { command: string }) {
@@ -65,111 +268,575 @@ function CommandBlock({ command }: { command: string }) {
     try {
       let success = false;
       if (navigator.clipboard && window.isSecureContext) {
-        try { await navigator.clipboard.writeText(command); success = true; } catch { /* Fall back when browser clipboard permission is unavailable. */ }
+        try {
+          await navigator.clipboard.writeText(command);
+          success = true;
+        } catch {
+          /* Fall back when browser clipboard permission is unavailable. */
+        }
       }
       if (!success) {
         const previous = document.activeElement;
-        const input = document.createElement('textarea'); input.value = command; input.style.position = 'fixed'; input.style.opacity = '0'; document.body.appendChild(input); input.select();
-        success = document.execCommand('copy'); input.remove();
+        const input = document.createElement("textarea");
+        input.value = command;
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        input.select();
+        success = document.execCommand("copy");
+        input.remove();
         if (previous instanceof HTMLElement) previous.focus();
         if (!success) throw new Error();
       }
-      setCopied(true); window.setTimeout(() => setCopied(false), 1600);
-    } catch { toast.error('复制失败，请手动选中命令复制。'); }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("复制失败，请手动选中命令复制。");
+    }
   }
-  return <div className="release-command"><pre><code>{command}</code></pre><button onClick={copy} aria-label="复制此命令">{copied ? <Check /> : <Copy />}{copied ? '已复制' : '复制'}</button></div>;
+  return (
+    <div className="release-command">
+      <pre>
+        <code>{command}</code>
+      </pre>
+      <button onClick={copy} aria-label="复制此命令">
+        {copied ? <Check /> : <Copy />}
+        {copied ? "已复制" : "复制"}
+      </button>
+    </div>
+  );
 }
 
-export default function ReleaseCenter({ theme, accent }: { theme: string; accent: string }) {
+export default function ReleaseCenter({
+  context,
+}: {
+  context: ConsoleContext;
+}) {
   const [state, setState] = useState<State | null>(null);
-  const [tag, setTag] = useState('');
-  const [share, setShare] = useState('');
+  const [tag, setTag] = useState("");
+  const [share, setShare] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [receivedAt, setReceivedAt] = useState(() => Date.now());
   const [overwrite, setOverwrite] = useState(false);
-  const [tab, setTab] = useState<'files' | 'commands'>('files');
-  const [platform, setPlatform] = useState('linux');
+  const [tab, setTab] = useState<"files" | "commands">("files");
+  const [platform, setPlatform] = useState("linux");
   const [commands, setCommands] = useState<Commands | null>(null);
   const [commandsBusy, setCommandsBusy] = useState(false);
-  const [commandsError, setCommandsError] = useState('');
+  const [commandsError, setCommandsError] = useState("");
   const load = useCallback(async () => {
-    try { const next = await request() as State; setState(next); setReceivedAt(Date.now()); setError(''); }
-    catch (err) { setError(err instanceof Error ? err.message : '读取失败'); }
+    try {
+      const next = (await request()) as State;
+      setState(next);
+      setReceivedAt(Date.now());
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取失败");
+    }
   }, []);
-  useEffect(() => { let active = true; request().then(next => { if (active) { setState(next); setReceivedAt(Date.now()); setTag(next.releases.find(item => !item.prerelease)?.tag || next.releases[0]?.tag || ''); } }).catch(err => { if (active) setError(err.message); }); return () => { active = false; }; }, []);
-  useEffect(() => { document.documentElement.dataset.theme = theme; document.documentElement.style.colorScheme = theme; }, [theme]);
-  const running = state?.job?.status === 'running';
+  useEffect(() => {
+    let active = true;
+    request()
+      .then((next) => {
+        if (active) {
+          setState(next);
+          setReceivedAt(Date.now());
+          setTag(
+            next.releases.find((item) => !item.prerelease)?.tag ||
+              next.releases[0]?.tag ||
+              "",
+          );
+        }
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const running = state?.job?.status === "running";
   useEffect(() => {
     if (!running) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => { await load(); if (active) timer = setTimeout(poll, 1000); };
+    const poll = async () => {
+      await load();
+      if (active) timer = setTimeout(poll, 1000);
+    };
     timer = setTimeout(poll, 1000);
-    return () => { active = false; clearTimeout(timer); };
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [running, load]);
   useEffect(() => {
-    if (!tag || tab !== 'commands') return;
+    if (!tag || tab !== "commands") return;
     let active = true;
-    request<Commands>({ action: 'commands', tag, platform }).then(result => { if (active) { setCommands(result); setCommandsBusy(false); } }).catch(err => { if (active) { setCommandsError(err.message); setCommandsBusy(false); } });
-    return () => { active = false; };
+    request<Commands>({ action: "commands", tag, platform })
+      .then((result) => {
+        if (active) {
+          setCommands(result);
+          setCommandsBusy(false);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setCommandsError(err.message);
+          setCommandsBusy(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, [tag, platform, tab]);
   async function act(action: string) {
-    setBusy(true); setError('');
+    setBusy(true);
+    setError("");
     try {
-      const next = await request({ action, tag, ...(action === 'configure' ? { shareUrl: share } : {}), allowOverwrite: overwrite }) as State;
-      setState(next); setReceivedAt(Date.now());
-      if (action === 'configure') { setShare(''); setOverwrite(false); toast.success('分享地址已加密保存'); }
-      if (action === 'refresh' && !next.releases.some(item => item.tag === tag)) setTag(next.releases.find(item => !item.prerelease)?.tag || next.releases[0]?.tag || '');
-    } catch (err) { setError(err instanceof Error ? err.message : '操作失败'); }
-    finally { setBusy(false); }
+      const next = (await request({
+        action,
+        tag,
+        ...(action === "configure" ? { shareUrl: share } : {}),
+        allowOverwrite: overwrite,
+      })) as State;
+      setState(next);
+      setReceivedAt(Date.now());
+      if (action === "configure") {
+        setShare("");
+        setOverwrite(false);
+        toast.success("分享地址已加密保存");
+      }
+      if (
+        action === "refresh" &&
+        !next.releases.some((item) => item.tag === tag)
+      )
+        setTag(
+          next.releases.find((item) => !item.prerelease)?.tag ||
+            next.releases[0]?.tag ||
+            "",
+        );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "操作失败");
+    } finally {
+      setBusy(false);
+    }
   }
-  const release = state?.releases.find(item => item.tag === tag);
+  const release = state?.releases.find((item) => item.tag === tag);
   const comparison = state?.comparison?.tag === tag ? state.comparison : null;
   const assets = comparison?.assets || release?.assets || [];
-  const conflicts = comparison?.assets.filter(item => item.status === 'conflict').length || 0;
-  const missing = comparison?.assets.filter(item => item.status === 'missing').length || 0;
-  const aligned = comparison?.assets.filter(item => item.status === 'aligned').length || 0;
+  const conflicts =
+    comparison?.assets.filter((item) => item.status === "conflict").length || 0;
+  const missing =
+    comparison?.assets.filter((item) => item.status === "missing").length || 0;
+  const aligned =
+    comparison?.assets.filter((item) => item.status === "aligned").length || 0;
   const disabled = busy || running;
-  return <div className={`release-center theme-${theme} accent-${accent}`}>
-    <Toaster richColors />
-    <header className="release-topbar"><Link href="/"><ArrowLeft />返回工作台</Link><span><ShieldCheck />验证器保护</span></header>
-    <main className="release-main">
-      <section className="release-heading"><div><p className="eyebrow">SOFTWARE DELIVERY</p><h1>SMA 版本中心<span>Release Hub</span></h1><p>从 GitHub 到内网，让每一次交付都有据可查。</p></div><Button onClick={() => act('refresh')} disabled={disabled}><RefreshCw className={busy ? 'spin' : ''} />刷新 GitHub</Button></section>
-      {error && <div role="alert" className="release-alert"><TriangleAlert />{error}<button onClick={() => void load()}>重试读取</button></div>}
-      <section className="release-endpoints" aria-label="同步来源与目标">
-        <div><GitBranch /><span><small>权威发布源</small><a href="https://github.com/Leexxin/server-monitor-agent/releases" target="_blank" rel="noreferrer">Leexxin / server-monitor-agent<ArrowUpRight /></a></span><b>GitHub Releases</b></div>
-        <div><Download /><span><small>内网镜像 · SFTPGo</small><strong>{state?.targetOrigin || '尚未配置本地文件仓库'}</strong></span><b>{state?.configured ? '已保存' : '待配置'}</b></div>
-      </section>
-      <details className="release-config" open={!state?.configured}><summary>配置本地分享地址</summary><p>填写 SFTPGo 的 upload 分享页。需要同时具备列举、下载和上传权限；地址加密保存，不会写入 Git 或页面 JSON 备份。</p><div><Input aria-label="SFTPGo 分享地址" type="url" value={share} onChange={event => setShare(event.target.value)} placeholder="http://文件服务器:8080/web/client/pubshares/分享标识/upload" disabled={disabled} /><Button onClick={() => act('configure')} disabled={disabled || !share.trim()}>保存配置</Button></div></details>
-      {state?.job && <JobProgress job={state.job} receivedAt={receivedAt} />}
-      <div className="release-workspace">
-        <aside className="release-versions"><div className="release-panel-title"><Package /><h2>发布版本</h2><span>{state?.releases.length || 0}</span></div><p>包含稳定版和预览版</p>{!state?.releases.length && <div className="release-empty">点击右上角“刷新 GitHub”<br />获取实际发布版本</div>}{state?.releases.map(item => <button key={item.tag} className={tag === item.tag ? 'selected' : ''} aria-pressed={tag === item.tag} onClick={() => { setTag(item.tag); setOverwrite(false); setCommands(null); setCommandsError(''); setCommandsBusy(tab === 'commands'); }}><span><strong>{item.tag}</strong><small>{item.prerelease ? '预览版' : '稳定版'} · {item.assets.length} 个附件</small></span><small>{new Date(item.publishedAt).toLocaleDateString('zh-CN')}</small></button>)}</aside>
-        <section className="release-content">
-          {!release ? <div className="release-welcome"><Package /><h2>选择一个发布版本</h2><p>核对真实文件内容，再决定是否同步。不会自动安装或执行任何脚本。</p></div> : <>
-            <div className="release-version-heading"><div><span className="release-tag">{release.prerelease ? 'PRE-RELEASE' : 'STABLE RELEASE'}</span><h2>{release.name}</h2><a href={release.url} target="_blank" rel="noreferrer">查看 GitHub 发布说明<ArrowUpRight /></a></div><span>{size(release.assets.reduce((sum, asset) => sum + asset.size, 0))}<small>{release.assets.length} 个附件</small></span></div>
-            <div role="tablist" aria-label="版本内容" className="release-tabs"><button role="tab" aria-selected={tab === 'files'} onClick={() => setTab('files')}><Package />附件与对齐</button><button role="tab" aria-selected={tab === 'commands'} onClick={() => { if (tab !== 'commands') { setTab('commands'); setCommandsBusy(true); setCommandsError(''); } }}><Terminal />安装与运维命令</button></div>
-            {tab === 'files' ? <>
-              <div className="release-stats"><div><small>缺失附件</small><strong>{comparison ? missing : '—'}</strong></div><div><small>内容冲突</small><strong>{comparison ? conflicts : '—'}</strong></div><div><small>校验一致</small><strong>{comparison ? aligned : '—'}</strong></div></div>
-              <div className="release-actions"><Button variant="outline" onClick={() => act('compare')} disabled={disabled || !state?.configured}><ShieldCheck />核对两边仓库</Button><Button onClick={() => act('sync')} disabled={disabled || !comparison || !assets.length || assets.some(asset => asset.status === 'unverified') || (conflicts > 0 && !overwrite)}><Download />同步所选版本</Button></div>
-              <p className="release-help">目标版本目录：<strong>/{tag}/</strong>。仅在此目录内进行 SHA-256 比对和上传，不写入根目录、不影响其他版本。{comparison && !comparison.folderExists && '该版本目录尚不存在，同步时会自动创建。'}</p>
-              {comparison && <label className="release-overwrite"><input type="checkbox" checked={overwrite} disabled={disabled} onChange={event => setOverwrite(event.target.checked)} /><span>允许替换 /{tag}/ 内的冲突文件，包括此版本的脚本、校验清单及索引。<small>不会覆盖其他版本目录。单版本内仍不是原子发布，请避免同时手动上传。</small></span></label>}
+  return (
+    <ConsoleShell context={context} current="releases" breadcrumb="版本中心">
+      <div className="release-center">
+        <main className="release-main">
+          <section className="release-heading">
+            <div>
+              <h1>版本中心</h1>
+              <p>SMA 发布版本与内网镜像</p>
+            </div>
+            <Button onClick={() => act("refresh")} disabled={disabled}>
+              <RefreshCw className={busy ? "spin" : ""} />
+              刷新 GitHub
+            </Button>
+          </section>
+          {error && (
+            <div role="alert" className="release-alert">
+              <TriangleAlert />
+              {error}
+              <button onClick={() => void load()}>重试读取</button>
+            </div>
+          )}
+          <section className="release-endpoints" aria-label="同步来源与目标">
+            <div>
+              <GitBranch />
+              <span>
+                <small>发布源</small>
+                <a
+                  href="https://github.com/Leexxin/server-monitor-agent/releases"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Leexxin / server-monitor-agent
+                  <ArrowUpRight />
+                </a>
+              </span>
+              <b>GitHub Releases</b>
+            </div>
+            <div>
+              <Download />
+              <span>
+                <small>内网镜像 · SFTPGo</small>
+                <strong>{state?.targetOrigin || "尚未配置本地文件仓库"}</strong>
+              </span>
+              <b>{state?.configured ? "已保存" : "待配置"}</b>
+            </div>
+          </section>
+          <details className="release-config" open={!state?.configured}>
+            <summary>配置本地分享地址</summary>
+            <p>
+              填写 SFTPGo 的 upload
+              分享页。需要同时具备列举、下载和上传权限；地址加密保存，不会写入
+              Git 或页面 JSON 备份。
+            </p>
+            <div>
+              <Input
+                aria-label="SFTPGo 分享地址"
+                type="url"
+                value={share}
+                onChange={(event) => setShare(event.target.value)}
+                placeholder="http://文件服务器:8080/web/client/pubshares/分享标识/upload"
+                disabled={disabled}
+              />
+              <Button
+                onClick={() => act("configure")}
+                disabled={disabled || !share.trim()}
+              >
+                保存配置
+              </Button>
+            </div>
+          </details>
+          {state?.job && (
+            <JobProgress job={state.job} receivedAt={receivedAt} />
+          )}
+          <div className="release-workspace">
+            <aside className="release-versions">
+              <div className="release-panel-title">
+                <Package />
+                <h2>发布版本</h2>
+                <span>{state?.releases.length || 0}</span>
+              </div>
+              <p>包含稳定版和预览版</p>
+              {!state?.releases.length && (
+                <div className="release-empty">
+                  点击右上角“刷新 GitHub”
+                  <br />
+                  获取实际发布版本
+                </div>
+              )}
+              {state?.releases.map((item) => (
+                <button
+                  key={item.tag}
+                  className={tag === item.tag ? "selected" : ""}
+                  aria-pressed={tag === item.tag}
+                  onClick={() => {
+                    setTag(item.tag);
+                    setOverwrite(false);
+                    setCommands(null);
+                    setCommandsError("");
+                    setCommandsBusy(tab === "commands");
+                  }}
+                >
+                  <span>
+                    <strong>{item.tag}</strong>
+                    <small>
+                      {item.prerelease ? "预览版" : "稳定版"} ·{" "}
+                      {item.assets.length} 个附件
+                    </small>
+                  </span>
+                  <small>
+                    {new Date(item.publishedAt).toLocaleDateString("zh-CN")}
+                  </small>
+                </button>
+              ))}
+            </aside>
+            <section className="release-content">
+              {!release ? (
+                <div className="release-welcome">
+                  <Package />
+                  <h2>选择一个发布版本</h2>
+                  <p>
+                    核对真实文件内容，再决定是否同步。不会自动安装或执行任何脚本。
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="release-version-heading">
+                    <div>
+                      <span className="release-tag">
+                        {release.prerelease ? "预览版" : "稳定版"}
+                      </span>
+                      <h2>{release.name}</h2>
+                      <a href={release.url} target="_blank" rel="noreferrer">
+                        查看 GitHub 发布说明
+                        <ArrowUpRight />
+                      </a>
+                    </div>
+                    <span>
+                      {size(
+                        release.assets.reduce(
+                          (sum, asset) => sum + asset.size,
+                          0,
+                        ),
+                      )}
+                      <small>{release.assets.length} 个附件</small>
+                    </span>
+                  </div>
+                  <div
+                    role="tablist"
+                    aria-label="版本内容"
+                    className="release-tabs"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={tab === "files"}
+                      onClick={() => setTab("files")}
+                    >
+                      <Package />
+                      附件与对齐
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={tab === "commands"}
+                      onClick={() => {
+                        if (tab !== "commands") {
+                          setTab("commands");
+                          setCommandsBusy(true);
+                          setCommandsError("");
+                        }
+                      }}
+                    >
+                      <Terminal />
+                      安装与运维命令
+                    </button>
+                  </div>
+                  {tab === "files" ? (
+                    <>
+                      <div className="release-stats">
+                        <div>
+                          <small>缺失附件</small>
+                          <strong>{comparison ? missing : "—"}</strong>
+                        </div>
+                        <div>
+                          <small>内容冲突</small>
+                          <strong>{comparison ? conflicts : "—"}</strong>
+                        </div>
+                        <div>
+                          <small>校验一致</small>
+                          <strong>{comparison ? aligned : "—"}</strong>
+                        </div>
+                      </div>
+                      <div className="release-actions">
+                        <Button
+                          variant="outline"
+                          onClick={() => act("compare")}
+                          disabled={disabled || !state?.configured}
+                        >
+                          <ShieldCheck />
+                          核对两边仓库
+                        </Button>
+                        <Button
+                          onClick={() => act("sync")}
+                          disabled={
+                            disabled ||
+                            !comparison ||
+                            !assets.length ||
+                            assets.some(
+                              (asset) => asset.status === "unverified",
+                            ) ||
+                            (conflicts > 0 && !overwrite)
+                          }
+                        >
+                          <Download />
+                          同步所选版本
+                        </Button>
+                      </div>
+                      <p className="release-help">
+                        目标版本目录：<strong>/{tag}/</strong>。仅在此目录内进行
+                        SHA-256 比对和上传，不写入根目录、不影响其他版本。
+                        {comparison &&
+                          !comparison.folderExists &&
+                          "该版本目录尚不存在，同步时会自动创建。"}
+                      </p>
+                      {comparison && (
+                        <label className="release-overwrite">
+                          <input
+                            type="checkbox"
+                            checked={overwrite}
+                            disabled={disabled}
+                            onChange={(event) =>
+                              setOverwrite(event.target.checked)
+                            }
+                          />
+                          <span>
+                            允许替换 /{tag}/
+                            内的冲突文件，包括此版本的脚本、校验清单及索引。
+                            <small>
+                              不会覆盖其他版本目录。单版本内仍不是原子发布，请避免同时手动上传。
+                            </small>
+                          </span>
+                        </label>
+                      )}
 
-              <div className="release-table-wrap"><table><thead><tr><th>发布附件</th><th>大小</th><th>本地状态</th></tr></thead><tbody>{assets.map(asset => <tr key={asset.name}><td><a href={asset.url} target="_blank" rel="noreferrer">{asset.name}<ArrowUpRight /></a><small title={asset.digest || '缺少可信 SHA-256'}>{asset.digest ? `SHA-256 ${asset.digest.slice(0, 16)}…` : '未提供 SHA-256'}</small></td><td>{size(asset.size)}</td><td><span className={`release-file-state ${asset.status || ''}`}>{labels[asset.status || ''] || '尚未核对'}</span></td></tr>)}</tbody></table></div>
-              {comparison && <p className="release-help">核对时间：{new Date(comparison.checkedAt).toLocaleString('zh-CN')}。{comparison.directory}/ 内额外 {comparison.extras} 个项目保持不变。同步前会重新核对。</p>}
-              <details className="release-notes"><summary>发布说明</summary><pre>{release.body || '此版本未提供说明。'}</pre></details>
-            </> : <div className="release-docs">
-              <div className="release-platform" role="group" aria-label="命令平台">{['linux', 'windows'].map(value => <button aria-pressed={platform === value} key={value} onClick={() => { if (platform !== value) { setPlatform(value); setCommandsBusy(true); setCommandsError(''); } }}>{value === 'linux' ? 'Linux' : 'Windows / PowerShell'}</button>)}</div>
-              <div className="release-warning"><TriangleAlert /><p>命令来自所选 Release 标签的项目文档，展示不代表执行。先阅读原文和权限要求，再到目标服务器运行。Token 不要粘贴到公开日志；卸载、清理、换 Token 和升级可能中断服务。</p></div>
-              <p className="release-help">镜像按 /{tag}/ 隔离。请使用下方版本目录直链与 SHA-256 校验命令，并仅选择匹配系统和架构的安装包。上游默认自动安装脚本和 sma-ctl upgrade 仍读取根目录，不适用于此布局，相关命令已隐藏；升级请安装目标版本原生包。</p>
-              {commandsBusy && <p role="status">正在读取该版本文档…</p>}{commandsError && <p role="alert">{commandsError}</p>}
-              {!commandsBusy && commands?.tag === tag && commands.platform === platform && commands.documents.map(document => <section key={document.path}><div className="release-doc-heading"><h3>{document.path}</h3><a href={document.source} target="_blank" rel="noreferrer">阅读完整文档<ArrowUpRight /></a></div>{document.error && <p className="release-warning">{document.error}</p>}{document.groups.map((group, index) => <details className="release-command-group" key={index} open={index === 0}><summary>{group.title}{group.dangerous && <span>含风险操作 · 请先备份</span>}</summary><CommandBlock command={group.command} /></details>)}</section>)}
-            </div>}
-          </>}
-        </section>
+                      <div className="release-table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>发布附件</th>
+                              <th>大小</th>
+                              <th>本地状态</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {assets.map((asset) => (
+                              <tr key={asset.name}>
+                                <td>
+                                  <a
+                                    href={asset.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    {asset.name}
+                                    <ArrowUpRight />
+                                  </a>
+                                  <small
+                                    title={asset.digest || "缺少可信 SHA-256"}
+                                  >
+                                    {asset.digest
+                                      ? `SHA-256 ${asset.digest.slice(0, 16)}…`
+                                      : "未提供 SHA-256"}
+                                  </small>
+                                </td>
+                                <td>{size(asset.size)}</td>
+                                <td>
+                                  <span
+                                    className={`release-file-state ${asset.status || ""}`}
+                                  >
+                                    {labels[asset.status || ""] || "尚未核对"}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {comparison && (
+                        <p className="release-help">
+                          核对时间：
+                          {new Date(comparison.checkedAt).toLocaleString(
+                            "zh-CN",
+                          )}
+                          。{comparison.directory}/ 内额外 {comparison.extras}{" "}
+                          个项目保持不变。同步前会重新核对。
+                        </p>
+                      )}
+                      <details className="release-notes">
+                        <summary>发布说明</summary>
+                        <pre>{release.body || "此版本未提供说明。"}</pre>
+                      </details>
+                    </>
+                  ) : (
+                    <div className="release-docs">
+                      <div
+                        className="release-platform"
+                        role="group"
+                        aria-label="命令平台"
+                      >
+                        {["linux", "windows"].map((value) => (
+                          <button
+                            aria-pressed={platform === value}
+                            key={value}
+                            onClick={() => {
+                              if (platform !== value) {
+                                setPlatform(value);
+                                setCommandsBusy(true);
+                                setCommandsError("");
+                              }
+                            }}
+                          >
+                            {value === "linux"
+                              ? "Linux"
+                              : "Windows / PowerShell"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="release-warning">
+                        <TriangleAlert />
+                        <p>
+                          命令来自所选 Release
+                          标签的项目文档，展示不代表执行。先阅读原文和权限要求，再到目标服务器运行。Token
+                          不要粘贴到公开日志；卸载、清理、换 Token
+                          和升级可能中断服务。
+                        </p>
+                      </div>
+                      <p className="release-help">
+                        镜像按 /{tag}/ 隔离。请使用下方版本目录直链与 SHA-256
+                        校验命令，并仅选择匹配系统和架构的安装包。上游默认自动安装脚本和
+                        sma-ctl upgrade
+                        仍读取根目录，不适用于此布局，相关命令已隐藏；升级请安装目标版本原生包。
+                      </p>
+                      {commandsBusy && <p role="status">正在读取该版本文档…</p>}
+                      {commandsError && <p role="alert">{commandsError}</p>}
+                      {!commandsBusy &&
+                        commands?.tag === tag &&
+                        commands.platform === platform &&
+                        commands.documents.map((document) => (
+                          <section key={document.path}>
+                            <div className="release-doc-heading">
+                              <h3>{document.path}</h3>
+                              <a
+                                href={document.source}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                阅读完整文档
+                                <ArrowUpRight />
+                              </a>
+                            </div>
+                            {document.error && (
+                              <p className="release-warning">
+                                {document.error}
+                              </p>
+                            )}
+                            {document.groups.map((group, index) => (
+                              <details
+                                className="release-command-group"
+                                key={index}
+                                open={index === 0}
+                              >
+                                <summary>
+                                  {group.title}
+                                  {group.dangerous && (
+                                    <span>含风险操作 · 请先备份</span>
+                                  )}
+                                </summary>
+                                <CommandBlock command={group.command} />
+                              </details>
+                            ))}
+                          </section>
+                        ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          </div>
+          {!!state?.history.length && (
+            <details className="release-history">
+              <summary>最近任务记录 · {state.history.length}</summary>
+              {state.history.map((job) => (
+                <div key={job.id}>
+                  <span>
+                    {new Date(job.startedAt).toLocaleString("zh-CN")} ·{" "}
+                    {job.tag} · {job.kind}
+                    {job.layout === "legacy-flat"
+                      ? " · 旧根目录记录"
+                      : ` · /${job.tag}/`}
+                  </span>
+                  <strong>{job.status}</strong>
+                  <p>{job.message}</p>
+                </div>
+              ))}
+            </details>
+          )}
+        </main>
       </div>
-      {!!state?.history.length && <details className="release-history"><summary>最近任务记录 · {state.history.length}</summary>{state.history.map(job => <div key={job.id}><span>{new Date(job.startedAt).toLocaleString('zh-CN')} · {job.tag} · {job.kind}{job.layout === 'legacy-flat' ? ' · 旧根目录记录' : ` · /${job.tag}/`}</span><strong>{job.status}</strong><p>{job.message}</p></div>)}</details>}
-      <footer className="release-footer"><ShieldCheck />先核对，再发布。GitHub 为源，内网为镜像，不反向修改 GitHub，不自动执行安装。</footer>
-    </main>
-  </div>;
+    </ConsoleShell>
+  );
 }
