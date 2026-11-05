@@ -11,3 +11,7 @@ dist
 outputs
 work
 .sma-center-data
+
+# Host-side source snapshots are not application sources.
+releases/**
+DEPLOYED_COMMIT

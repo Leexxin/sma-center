@@ -49,3 +49,7 @@ next-env.d.ts
 /outputs/
 /work/
 /.sma-center-data/
+
+# Host-side source snapshots and deployment receipt.
+/releases/
+/DEPLOYED_COMMIT
