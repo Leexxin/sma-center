@@ -44,10 +44,21 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import ConsoleShell, { type ConsoleView } from "@/components/console/shell";
-import ResourceManager, {
+import {
   ResourceEditor,
   dialogTheme,
 } from "@/components/console/resource-manager";
+import EnhancedCard, {
+  CardFields,
+  CardIcon,
+} from "@/components/console/card-runtime";
+import {
+  createCardId,
+  cardIcons,
+  parseCardValues,
+  editableCardValues,
+  type CardDefinition,
+} from "@/lib/card-package";
 import ConsoleSettings from "@/components/console/settings";
 import ServerMetrics from "@/components/console/server-metrics";
 import { toast } from "sonner";
@@ -194,21 +205,56 @@ function History({
     </div>
   );
 }
+function makeWidget(
+  type: WidgetType,
+  definition?: CardDefinition,
+  resourceId = "",
+): Widget {
+  return {
+    version: 1,
+    id: createCardId(),
+    type,
+    title: "",
+    size:
+      definition?.size ||
+      (["timeseries", "links", "events"].includes(type) ? "wide" : "medium"),
+    resourceId,
+    metric: "cpuPercent",
+    text: "",
+    threshold: 90,
+    ...(definition
+      ? {
+          pluginId: definition.id,
+          icon: definition.icon,
+          values: Object.fromEntries(
+            definition.fields.map((f) => [f.key, f.default]),
+          ),
+        }
+      : {}),
+  };
+}
 export default function Workspace({
   initialBoards,
   resources: initialResources,
   initialPreferences,
   initialView,
   initialBoard,
+  initialDefinitions,
+  initialAdd,
+  initialResource,
 }: {
+  initialDefinitions: CardDefinition[];
+  initialAdd?: string;
+  initialResource?: string;
   initialBoards: Board[];
   resources: Resource[];
   initialPreferences: Preferences;
   initialView?: string;
   initialBoard?: string;
 }) {
+  const [definitions, setDefinitions] = useState(initialDefinitions);
+  const initialDef = initialDefinitions.find((d) => d.id === initialAdd);
   const [resources, setResources] = useState(initialResources);
-  const [resourceOpen, setResourceOpen] = useState(initialView === "resources");
   const [settingsOpen, setSettingsOpen] = useState(initialView === "settings");
   const [resourceEditor, setResourceEditor] = useState<
     Resource | null | undefined
@@ -220,14 +266,7 @@ export default function Workspace({
         : initialBoards[0].id,
     );
   const active = boards.find((b) => b.id === activeId) || boards[0];
-  const [draft, setDraft] = useState<Board | null>(
-      initialView === "gallery"
-        ? structuredClone(
-            initialBoards.find((b) => b.id === initialBoard) ||
-              initialBoards[0],
-          )
-        : null,
-    ),
+  const [draft, setDraft] = useState<Board | null>(null),
     [past, setPast] = useState<Board[]>([]),
     [future, setFuture] = useState<Board[]>([]);
   const [preferences, setPreferences] = useState(initialPreferences),
@@ -237,9 +276,20 @@ export default function Workspace({
     [series, setSeries] = useState<
       Record<string, { points: Point[]; error?: boolean }>
     >({});
-  const [gallery, setGallery] = useState(initialView === "gallery"),
-    [configure, setConfigure] = useState<Widget | null>(null),
-    [selected, setSelected] = useState<WidgetType>("resource"),
+  const [gallery, setGallery] = useState(
+      Boolean(initialAdd || initialResource),
+    ),
+    [configure, setConfigure] = useState<Widget | null>(() =>
+      initialDef
+        ? makeWidget("plugin", initialDef)
+        : initialResource
+          ? makeWidget("resource", undefined, initialResource)
+          : initialAdd &&
+              widgetTypes.includes(initialAdd as WidgetType) &&
+              initialAdd !== "plugin"
+            ? makeWidget(initialAdd as WidgetType)
+            : null,
+    ),
     [boardDialog, setBoardDialog] = useState(initialView === "new-board"),
     [newName, setNewName] = useState("");
   const [detail, setDetail] = useState<Resource | null>(null),
@@ -420,47 +470,61 @@ export default function Workspace({
     }
   }
   function openGallery() {
-    if (!draft) begin();
     setConfigure(null);
-    setSelected("resource");
     setGallery(true);
   }
   function choose(type: WidgetType) {
-    setSelected(type);
-    setConfigure({
-      version: 1,
-      id: crypto.randomUUID(),
-      type,
-      title: "",
-      size:
-        type === "timeseries" || type === "links" || type === "events"
-          ? "wide"
-          : "medium",
-      resourceId: "",
-      metric: "cpuPercent",
-      text: "",
-      threshold: 90,
-    });
+    setConfigure(makeWidget(type));
   }
-  function addWidget() {
-    if (!configure || !draft) return;
-    const existing = draft.widgets.some((w) => w.id === configure.id);
-    if (draft.widgets.length >= 60 && !existing) {
-      toast.error("最多添加 60 张卡片。");
-      return;
+  async function addWidget() {
+    if (!configure || saving) return;
+    let configured = configure;
+    try {
+      if (configure.type === "plugin") {
+        const definition = definitions.find((d) => d.id === configure.pluginId);
+        if (!definition) throw new Error("插件不存在");
+        configured = {
+          ...configure,
+          values: parseCardValues(definition, configure.values || {}),
+        };
+      }
+      const base = draft || active,
+        existing = base.widgets.some((w) => w.id === configured.id);
+      if (base.widgets.length >= 60 && !existing)
+        throw new Error("最多添加 60 张卡片。");
+      const next = {
+        ...base,
+        widgets: existing
+          ? base.widgets.map((w) => (w.id === configured.id ? configured : w))
+          : [...base.widgets, configured],
+      };
+      if (draft) change(next);
+      else {
+        setSaving(true);
+        const saved = await json<Board>(`/api/dashboards/${base.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        });
+        setBoards((bs) => bs.map((b) => (b.id === saved.id ? saved : b)));
+        toast.success(existing ? "卡片已更新" : "卡片已添加");
+      }
+      setGallery(false);
+      setConfigure(null);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
     }
-    change({
-      ...draft,
-      widgets: existing
-        ? draft.widgets.map((w) => (w.id === configure.id ? configure : w))
-        : [...draft.widgets, configure],
-    });
-    setGallery(false);
-    setConfigure(null);
   }
   function editWidget(w: Widget) {
-    setConfigure({ ...w });
-    setSelected(w.type);
+    const definition = definitions.find((d) => d.id === w.pluginId);
+    setConfigure({
+      ...w,
+      ...(definition
+        ? { values: editableCardValues(definition, w.values) }
+        : {}),
+    });
     setGallery(true);
   }
   async function eventAction(id: string, action: string) {
@@ -478,8 +542,7 @@ export default function Workspace({
   const status = (r: Resource) => {
     if (r.kind !== "server")
       return {
-        label:
-          r.kind === "tool" || r.kind === "site" ? "手动记录" : "未接入指标",
+        label: "未接入状态上报",
         className: "neutral",
       };
     if (!r.agentUrl) return { label: "未配置 Agent", className: "neutral" };
@@ -565,6 +628,15 @@ export default function Workspace({
   }
   function renderContent(w: Widget) {
     const r = resourceMap.get(w.resourceId);
+    if (w.type === "plugin")
+      return (
+        <EnhancedCard
+          widget={w}
+          definition={definitions.find((d) => d.id === w.pluginId)}
+          boardId={active.id}
+          editing={!!draft}
+        />
+      );
     if (w.type === "note")
       return <p className="ws-note">{w.text || "未填写内容"}</p>;
     if (w.type === "events")
@@ -702,7 +774,7 @@ export default function Workspace({
         .includes(query.toLowerCase()),
   );
   function openView(view: ConsoleView) {
-    if (view === "resources") setResourceOpen(true);
+    if (view === "resources") window.location.assign("/resources");
     if (view === "events") setEventOpen(true);
     if (view === "sources") setConnections(true);
     if (view === "gallery") {
@@ -711,43 +783,12 @@ export default function Workspace({
     }
     if (view === "settings") setSettingsOpen(true);
   }
-  function addResourceCard(resource: Resource) {
-    const base = draft || active;
-    if (base.widgets.length >= 60) {
-      toast.error("最多添加 60 张卡片。");
-      return;
-    }
-    const next = {
-      ...base,
-      widgets: [
-        ...base.widgets,
-        {
-          version: 1 as const,
-          id: crypto.randomUUID(),
-          type: "resource" as const,
-          title: "",
-          size: "medium" as const,
-          resourceId: resource.id,
-          metric: "cpuPercent" as const,
-          text: "",
-          threshold: 90,
-        },
-      ],
-    };
-    if (draft) change(next);
-    else {
-      setPast([base]);
-      setFuture([]);
-      setDraft(next);
-    }
-    setQuery("");
-    setResourceOpen(false);
-  }
   async function restored(
     nextResources: Resource[],
     nextPreferences: Preferences,
   ) {
     const nextBoards = await json<Board[]>("/api/dashboards");
+    setDefinitions(await json<CardDefinition[]>("/api/card-definitions"));
     setResources(nextResources);
     setPreferences(nextPreferences);
     setBoards(nextBoards);
@@ -895,7 +936,9 @@ export default function Workspace({
             const Icon =
               w.type === "resource" && r
                 ? resourceMeta[r.kind].icon
-                : templateIcons[w.type];
+                : w.type === "plugin"
+                  ? LayoutGrid
+                  : templateIcons[w.type];
             const index = current.widgets.findIndex((c) => c.id === w.id);
             return (
               <article
@@ -1010,10 +1053,24 @@ export default function Workspace({
                 )}
                 <div className="ws-cardhead">
                   <span className="ws-cardicon">
-                    <Icon size={18} />
+                    {w.icon || w.type === "plugin" ? (
+                      <CardIcon
+                        name={
+                          w.icon ||
+                          definitions.find((d) => d.id === w.pluginId)?.icon
+                        }
+                      />
+                    ) : (
+                      <Icon size={18} />
+                    )}
                   </span>
                   <div>
-                    <h2>{w.title || r?.name || widgetMeta[w.type].name}</h2>
+                    <h2>
+                      {w.title ||
+                        r?.name ||
+                        definitions.find((d) => d.id === w.pluginId)?.name ||
+                        widgetMeta[w.type].name}
+                    </h2>
                     <small>
                       {r
                         ? resourceMeta[r.kind].name
@@ -1030,7 +1087,6 @@ export default function Workspace({
                         if (w.type === "events") setEventOpen(true);
                         else if (r) setDetail(r);
                         else {
-                          begin();
                           editWidget(w);
                         }
                       }}
@@ -1067,7 +1123,8 @@ export default function Workspace({
               {configure
                 ? current.widgets.some((w) => w.id === configure.id)
                   ? "配置卡片"
-                  : widgetMeta[selected].name
+                  : definitions.find((d) => d.id === configure.pluginId)
+                      ?.name || widgetMeta[configure.type].name
                 : "添加卡片"}
             </DialogTitle>
             <DialogDescription>
@@ -1076,23 +1133,36 @@ export default function Workspace({
           </DialogHeader>
           {!configure ? (
             <div className="ws-templates">
-              {widgetTypes.map((type) => {
-                const Icon = templateIcons[type];
-                return (
-                  <button key={type} onClick={() => choose(type)}>
-                    <Icon size={22} />
-                    <strong>{widgetMeta[type].name}</strong>
-                    <small>{widgetMeta[type].description}</small>
-                    <Plus size={15} />
-                  </button>
-                );
-              })}
+              {widgetTypes
+                .filter((type) => type !== "plugin")
+                .map((type) => {
+                  const Icon = templateIcons[type];
+                  return (
+                    <button key={type} onClick={() => choose(type)}>
+                      <Icon size={22} />
+                      <strong>{widgetMeta[type].name}</strong>
+                      <small>{widgetMeta[type].description}</small>
+                      <Plus size={15} />
+                    </button>
+                  );
+                })}
+              {definitions.map((def) => (
+                <button
+                  key={def.id}
+                  onClick={() => setConfigure(makeWidget("plugin", def))}
+                >
+                  <CardIcon name={def.icon} size={22} />
+                  <strong>{def.name}</strong>
+                  <small>{def.description}</small>
+                  <Plus size={15} />
+                </button>
+              ))}
             </div>
           ) : (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                addWidget();
+                void addWidget();
               }}
               className="ws-config"
             >
@@ -1194,6 +1264,36 @@ export default function Workspace({
                   />
                 </label>
               )}
+              <label>
+                图标
+                <select
+                  aria-label="卡片图标"
+                  value={configure.icon || ""}
+                  onChange={(e) =>
+                    setConfigure({
+                      ...configure,
+                      icon: e.target.value || undefined,
+                    })
+                  }
+                >
+                  <option value="">自动</option>
+                  {cardIcons.map((icon) => (
+                    <option key={icon}>{icon}</option>
+                  ))}
+                </select>
+              </label>
+              {configure.type === "plugin" &&
+                definitions.find((d) => d.id === configure.pluginId) && (
+                  <CardFields
+                    definition={
+                      definitions.find((d) => d.id === configure.pluginId)!
+                    }
+                    values={configure.values || {}}
+                    onChange={(values) =>
+                      setConfigure({ ...configure, values })
+                    }
+                  />
+                )}
               <label>
                 尺寸
                 <select
@@ -1299,7 +1399,7 @@ export default function Workspace({
               className="ws-text-link"
               onClick={() => {
                 setConnections(false);
-                setResourceOpen(true);
+                window.location.assign("/resources");
               }}
             >
               管理资源 <ArrowUpRight size={13} />
@@ -1397,16 +1497,6 @@ export default function Workspace({
           )}
         </DialogContent>
       </Dialog>
-      <ResourceManager
-        open={resourceOpen}
-        onOpenChange={setResourceOpen}
-        resources={resources}
-        preferences={preferences}
-        boards={boards}
-        onChange={setResources}
-        onInspect={setDetail}
-        onAdd={addResourceCard}
-      />
       <ConsoleSettings
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

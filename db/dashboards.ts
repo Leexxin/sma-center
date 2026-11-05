@@ -1,3 +1,5 @@
+import { listCardDefinitions } from "./card-definitions";
+import { parseCardValues } from "../lib/card-package";
 import { getRawDb } from "./index";
 import {
   parseWidgets,
@@ -85,6 +87,12 @@ export async function writeBoard(
         throw new Error("INVALID_RESOURCE");
     }
   }
+  const definitions = await listCardDefinitions(userId);
+  for (const w of input.widgets.filter((w) => w.type === "plugin")) {
+    const definition = definitions.find((d) => d.id === w.pluginId);
+    if (!definition) throw new Error("INVALID_PLUGIN");
+    w.values = parseCardValues(definition, w.values || {});
+  }
   const now = Date.now();
   if (!id) {
     id = crypto.randomUUID();
@@ -120,6 +128,12 @@ export async function writeBoard(
       .run();
     if (!result.meta.changes) throw new Error("BOARD_CONFLICT");
   }
+  await db
+    .prepare(
+      "DELETE FROM card_states WHERE board_id=? AND user_id=? AND widget_id NOT IN (SELECT json_extract(value,'$.id') FROM json_each(?))",
+    )
+    .bind(id, userId, JSON.stringify(input.widgets))
+    .run();
   return map(
     (await db
       .prepare("SELECT * FROM dashboards WHERE id = ? AND user_id = ?")

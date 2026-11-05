@@ -12,11 +12,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { builtinCards, packageOnly } from "../lib/card-package.ts";
 import { TotpAuth, totp } from "../deploy/totp-auth.mjs";
 
 test(
   "workspace persists layouts, rejects stale writes, exports boards and samples without a dashboard open",
-  { timeout: 180000, skip: process.env.SMA_CENTER_BROWSER_TEST !== "1" },
+  { timeout: 235000, skip: process.env.SMA_CENTER_BROWSER_TEST !== "1" },
   async () => {
     const directory = mkdtempSync(join(tmpdir(), "sma-workspace-browser-")),
       profile = join(directory, "chrome");
@@ -189,7 +190,10 @@ test(
           else p.resolve(m.result);
         }
         if (m.method === "Runtime.exceptionThrown")
-          errors.push(m.params.exceptionDetails.text);
+          errors.push(
+            m.params.exceptionDetails.exception?.description ||
+              m.params.exceptionDetails.text,
+          );
       };
       const evaluate = async (expression) => {
         const r = await call("Runtime.evaluate", {
@@ -205,7 +209,21 @@ test(
           if (await evaluate(expression)) return;
           await delay(100);
         }
-        throw new Error("Expected state: " + expression + "\n" + log);
+        const shot = await call("Page.captureScreenshot", { format: "png" });
+        writeFileSync(
+          "/private/tmp/sma-cards-failure.png",
+          Buffer.from(shot.data, "base64"),
+        );
+        throw new Error(
+          "Expected state: " +
+            expression +
+            "\n" +
+            log +
+            "\nBODY: " +
+            (await evaluate("document.body.textContent.slice(0,4000)")) +
+            "\nEXCEPTIONS: " +
+            JSON.stringify(errors),
+        );
       };
       const api = async (path, method = "GET", body) =>
         evaluate(
@@ -218,6 +236,10 @@ test(
         mobile: false,
       });
       await call("Page.enable");
+      await call("Page.addScriptToEvaluateOnNewDocument", {
+        source:
+          "Object.defineProperty(Crypto.prototype,'randomUUID',{value:undefined,configurable:true})",
+      });
       await call("Runtime.enable");
       await call("Page.navigate", { url: origin + "/login" });
       await until("!!document.querySelector('#code')");
@@ -249,7 +271,7 @@ test(
       // The old resource entry opens management inside the overview frame.
       await call("Page.navigate", { url: origin + "/resources" });
       await until(
-        "location.pathname==='/' && !!document.querySelector('.ui-resource-list')",
+        "location.pathname==='/resources' && !!document.querySelector('.resources-grid') && !!document.documentElement.dataset.theme",
       );
       await evaluate(
         "[...document.querySelectorAll('button')].find(b=>b.textContent==='添加资源').click()",
@@ -266,7 +288,7 @@ test(
       }
       await evaluate("document.querySelector('.ws-config').requestSubmit()");
       await until(
-        "document.querySelector('.ui-resource-list')?.textContent.includes('UI Resource')",
+        "document.querySelector('.resources-grid')?.textContent.includes('UI Resource')",
       );
       assert(
         (await api("/api/resources")).body.some(
@@ -274,13 +296,19 @@ test(
         ),
       );
       await evaluate(
-        "document.querySelector('[aria-label=\"添加 UI Resource 到面板\"]').click()",
+        "[...document.querySelectorAll('.resource-tile')].find(e=>e.textContent.includes('UI Resource')).querySelector('a[href^=\"/?resource=\"]').click()",
       );
-      await until("!!document.querySelector('.ws-editbar')");
-      await evaluate(
-        "[...document.querySelectorAll('button')].find(b=>b.textContent==='保存').click()",
+      await until(
+        "!!document.querySelector('.ws-config select[required]') && document.body.textContent.includes('更新于')",
       );
-      await until("!document.querySelector('.ws-editbar')");
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until(
+        "!document.querySelector('[role=dialog]') && document.body.textContent.includes('UI Resource')",
+      );
+      assert.equal(
+        await evaluate("!!document.querySelector('.ws-editbar')"),
+        false,
+      );
       await call("Page.navigate", { url: origin + "/" });
       await until(
         "!!document.querySelector('.workspace') && document.body.textContent.includes('更新于') && !document.querySelector('[role=dialog]')",
@@ -337,10 +365,10 @@ test(
           "document.body.textContent.includes('Maintenance note')",
         ),
       );
-      await evaluate(
-        "[...document.querySelectorAll('button')].find(b=>b.textContent==='保存').click()",
+      assert.equal(
+        await evaluate("!!document.querySelector('.ws-editbar')"),
+        false,
       );
-      await until("!document.querySelector('.ws-editbar')");
       const stale = before[0];
       assert.equal(
         (await api("/api/dashboards/" + stale.id, "PUT", stale)).status,
@@ -392,7 +420,7 @@ test(
       // Editing metadata must preserve an existing write-only credential.
       await call("Page.navigate", { url: origin + "/?view=resources" });
       await until(
-        "document.querySelector('.ui-resource-list')?.textContent.includes('QA Node') && document.body.textContent.includes('更新于')",
+        "document.querySelector('.resources-grid')?.textContent.includes('QA Node') && !!document.documentElement.dataset.theme",
       );
       await evaluate(
         "document.querySelector('[aria-label=\"编辑 QA Node\"]').click()",
@@ -410,7 +438,231 @@ test(
         ).credentialConfigured,
         true,
       );
+      const baselineBoards = (await api("/api/dashboards")).body;
+      const mainBoard = baselineBoards[0];
+      await call("Page.navigate", { url: origin + "/?view=gallery" });
+      await until(
+        "location.pathname==='/cards' && !!document.documentElement.dataset.theme && !!document.querySelector('.card-type-grid')",
+      );
+      assert.equal(
+        await evaluate("!!document.querySelector('.ws-editbar')"),
+        false,
+      );
+      assert.equal(
+        (await api("/api/dashboards")).body[0].revision,
+        mainBoard.revision,
+      );
+      await call("Page.navigate", { url: origin + "/" });
+      await until("document.body.textContent.includes('更新于')");
+      await evaluate(
+        "[...document.querySelectorAll('button')].find(b=>b.textContent==='添加卡片').click()",
+      );
+      await until("!!document.querySelector('.ws-templates')");
+      assert.equal(await evaluate("typeof crypto.randomUUID"), "undefined");
+      assert.equal(
+        await evaluate("!!document.querySelector('.ws-editbar')"),
+        false,
+      );
+      await evaluate(
+        "document.querySelector('[data-slot=dialog-close]').click()",
+      );
+      await until("!document.querySelector('[role=dialog]')");
+      assert.equal(
+        (await api("/api/dashboards")).body[0].revision,
+        mainBoard.revision,
+      );
+      const manifest = {
+        ...packageOnly(builtinCards[0]),
+        id: "qa.clock",
+        name: "QA Clock",
+      };
+      const file = join(directory, "qa-clock.sma-card.json");
+      writeFileSync(file, JSON.stringify(manifest));
+      await call("Page.navigate", { url: origin + "/plugins" });
+      await until(
+        "location.pathname==='/plugins' && !!document.documentElement.dataset.theme",
+      );
+      const doc = await call("DOM.getDocument");
+      const upload = await call("DOM.querySelector", {
+        nodeId: doc.root.nodeId,
+        selector: "input[type=file]",
+      });
+      await call("DOM.setFileInputFiles", {
+        nodeId: upload.nodeId,
+        files: [file],
+      });
+      await until(
+        "document.querySelector('[role=dialog]')?.textContent.includes('QA Clock')",
+      );
+      await evaluate(
+        "[...document.querySelectorAll('button')].find(b=>b.textContent==='确认导入').click()",
+      );
+      await until(
+        "!document.querySelector('[role=dialog]') && document.querySelector('.card-type-grid')?.textContent.includes('QA Clock')",
+      );
+      assert.equal(
+        (await api("/api/card-definitions", "POST", { manifest, revision: 0 }))
+          .status,
+        409,
+      );
+      assert.equal(
+        (
+          await api("/api/card-definitions", "POST", {
+            manifest: { ...manifest, script: "fetch(1)" },
+            revision: 1,
+          })
+        ).status,
+        400,
+      );
+      await call("Page.navigate", { url: origin + "/?add=qa.clock" });
+      await until(
+        "!!document.querySelector('.ws-config') && document.body.textContent.includes('更新于')",
+      );
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until(
+        "!!document.querySelector('.card-clock') && !document.querySelector('[role=dialog]')",
+      );
+      const makeExtra = async (id) => {
+        await call("Page.navigate", { url: origin + "/?add=" + id });
+        await until(
+          "!!document.querySelector('.ws-config') && document.body.textContent.includes('更新于')",
+        );
+        await evaluate("document.querySelector('.ws-config').requestSubmit()");
+        await until("!document.querySelector('[role=dialog]')");
+        return (await api("/api/dashboards")).body[0].widgets.find(
+          (w) => w.pluginId === id,
+        );
+      };
+      const memo = await makeExtra("sma.memo");
+      await until(
+        `!!document.querySelector('[data-widget-id="${memo.id}"] textarea:not(:disabled)')`,
+      );
+      await evaluate(
+        `document.querySelector('[data-widget-id="${memo.id}"] textarea').focus()`,
+      );
+      await call("Input.insertText", { text: "Persistent memo" });
+      await evaluate(
+        `document.querySelector('[data-widget-id="${memo.id}"] .ws-text-link').click()`,
+      );
+      const memoPath =
+        "/api/dashboards/" + mainBoard.id + "/widgets/" + memo.id + "/state";
+      await until(
+        `document.querySelector('[data-widget-id="${memo.id}"] .ws-text-link').disabled`,
+      );
+      assert.equal((await api(memoPath)).body.state.text, "Persistent memo");
+      assert.equal(
+        (await api(memoPath, "PUT", { state: { text: "stale" }, revision: 0 }))
+          .status,
+        409,
+      );
+      assert.equal(
+        (await api("/api/dashboards/not-owned/widgets/" + memo.id + "/state"))
+          .status,
+        404,
+      );
+      const todo = await makeExtra("sma.todo");
+      await until(
+        `!!document.querySelector('[data-widget-id="${todo.id}"] input[aria-label="新待办"]:not(:disabled)')`,
+      );
+      await evaluate(
+        `document.querySelector('[data-widget-id="${todo.id}"] input[aria-label="新待办"]').focus()`,
+      );
+      await call("Input.insertText", { text: "Check deployment" });
+      await evaluate(
+        `document.querySelector('[data-widget-id="${todo.id}"] form').requestSubmit()`,
+      );
+      await until(
+        `!!document.querySelector('[data-widget-id="${todo.id}"] .card-todos input:not(:disabled)')`,
+      );
+      const layoutRevision = (await api("/api/dashboards")).body[0].revision;
+      await evaluate(
+        `document.querySelector('[data-widget-id="${todo.id}"] .card-todos input').click()`,
+      );
+      await until(
+        `document.querySelector('[data-widget-id="${todo.id}"] .card-todos input').checked && !document.querySelector('[data-widget-id="${todo.id}"] .card-todos input').disabled`,
+      );
+      assert.equal(
+        (
+          await api(
+            "/api/dashboards/" +
+              mainBoard.id +
+              "/widgets/" +
+              todo.id +
+              "/state",
+          )
+        ).body.state.items[0].done,
+        true,
+      );
+      assert.equal(
+        (await api("/api/dashboards")).body[0].revision,
+        layoutRevision,
+      );
+      assert.equal(
+        (await api("/api/card-definitions/qa.clock", "DELETE", { revision: 1 }))
+          .status,
+        409,
+      );
+      // A custom countdown package supplies a timezone-qualified default target.
+      const countdown = packageOnly(
+        builtinCards.find((p) => p.renderer === "countdown"),
+      );
+      countdown.id = "qa.countdown";
+      countdown.fields[0] = {
+        ...countdown.fields[0],
+        default: "2030-01-01T00:00:00+08:00",
+      };
+      assert.equal(
+        (
+          await api("/api/card-definitions", "POST", {
+            manifest: countdown,
+            revision: 0,
+          })
+        ).status,
+        200,
+      );
+      const countdownWidget = await makeExtra("qa.countdown");
+      const revisedCountdown = {
+        ...countdown,
+        fields: countdown.fields.filter((f) => f.key !== "caption"),
+      };
+      assert.equal(
+        (
+          await api("/api/card-definitions", "POST", {
+            manifest: revisedCountdown,
+            revision: 1,
+          })
+        ).status,
+        200,
+      );
+      await call("Page.navigate", { url: origin + "/" });
+      await until(
+        "document.body.textContent.includes('更新于') && document.body.textContent.includes('卡片字段已变更')",
+      );
+      await evaluate(
+        `document.querySelector('[data-widget-id="${countdownWidget.id}"] button[aria-label^="查看"]').click()`,
+      );
+      await until("!!document.querySelector('.ws-config')");
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until(
+        "!document.querySelector('[role=dialog]') && !document.body.textContent.includes('卡片字段已变更')",
+      );
+      await until("!!document.querySelector('.card-countdown strong')");
+      const fields = await makeExtra("sma.fields");
+      assert(fields);
+      await call("Page.reload");
+      await until(
+        "document.body.textContent.includes('更新于') && !!document.querySelector('.card-todos input:checked')",
+      );
+      assert.equal(
+        await evaluate(
+          `document.querySelector('[data-widget-id="${memo.id}"] textarea').value`,
+        ),
+        "Persistent memo",
+      );
       const backup = await api("/api/backup");
+      assert.equal(backup.body.cardDefinitions.length, 2);
+      assert.equal(backup.body.cardStates.length, 2);
+
       assert.equal(backup.status, 200);
       assert(backup.body.dashboards.some((b) => b.name === "测试面板"));
       assert(!JSON.stringify(backup.body).includes("ciphertext"));
@@ -419,6 +671,63 @@ test(
         mode: "merge",
       });
       assert.equal(restored.status, 200);
+      assert.equal((await api(memoPath)).body.state.text, "Persistent memo");
+      assert((await api(memoPath)).body.revision > 1);
+      const cleanupWidget = {
+        version: 1,
+        id: "cleanup-card",
+        type: "plugin",
+        pluginId: "sma.memo",
+        values: { text: "" },
+        title: "",
+        size: "medium",
+        resourceId: "",
+        metric: "cpuPercent",
+        text: "",
+        threshold: 90,
+      };
+      const temporary = (
+        await api("/api/dashboards", "POST", {
+          name: "cleanup",
+          revision: 0,
+          widgets: [cleanupWidget],
+        })
+      ).body;
+      const cleanupPath =
+        "/api/dashboards/" + temporary.id + "/widgets/cleanup-card/state";
+      assert.equal(
+        (
+          await api(cleanupPath, "PUT", {
+            state: { text: "temporary" },
+            revision: 0,
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        (
+          await api("/api/dashboards/" + temporary.id, "PUT", {
+            ...temporary,
+            widgets: [],
+          })
+        ).status,
+        200,
+      );
+      assert.equal((await api(cleanupPath)).status, 404);
+      assert(
+        !(await api("/api/backup")).body.cardStates.some(
+          (s) => s.widgetId === "cleanup-card",
+        ),
+      );
+      assert.equal(
+        (
+          await api("/api/dashboards/" + temporary.id, "DELETE", {
+            revision: 1,
+          })
+        ).status,
+        200,
+      );
+
       assert(
         (await api("/api/dashboards")).body.some((b) => b.name === "测试面板"),
       );
@@ -461,6 +770,9 @@ test(
         ["/servers/" + resource.body.id, "QA Node"],
         ["/security", "安全设置"],
         ["/applications", "业务应用"],
+        ["/resources", "资源"],
+        ["/cards", "卡片管理"],
+        ["/plugins", "插件"],
         ["/not-a-page", "页面未找到"],
       ]) {
         await call("Page.navigate", { url: origin + path });
@@ -501,11 +813,13 @@ test(
       await call("Page.navigate", { url: origin + "/security" });
       await until("location.pathname==='/security'");
       const requestsWithoutUI = requests;
-      for (let i = 0; i < 1000 && requests < requestsWithoutUI + 2; i++)
+      for (let i = 0; i < 1600 && requests < requestsWithoutUI + 2; i++)
         await delay(100);
       assert(
         requests >= requestsWithoutUI + 2,
-        "background sampler keeps running with no dashboard open; requests=" +
+        "background sampler keeps running with no dashboard open; initial=" +
+          requestsWithoutUI +
+          "; requests=" +
           requests +
           ": " +
           log,
@@ -568,7 +882,14 @@ test(
         );
       }
       assert.deepEqual(errors, []);
+      console.log(
+        "Verified resource, plugin, interactive persistence and background sampling flows",
+      );
     } finally {
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ id: 999999, method: "Browser.close" }));
+        await delay(500);
+      }
       socket?.close();
       await Promise.all(
         children.map(
@@ -584,10 +905,11 @@ test(
         ),
       );
       await new Promise((resolve) => agent.close(resolve));
+      await delay(500);
       rmSync(directory, {
         recursive: true,
         force: true,
-        maxRetries: 10,
+        maxRetries: 20,
         retryDelay: 100,
       });
     }

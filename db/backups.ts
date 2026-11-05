@@ -1,3 +1,9 @@
+import {
+  exportCards,
+  parseCardBackup,
+  cardRestoreStatements,
+  type CardBackup,
+} from "./card-backup";
 import { parseWidgets, type Widget } from "../lib/workspace-model";
 import { getRawDb } from "./index";
 
@@ -43,7 +49,7 @@ type BackupResource = {
   updatedAt: number;
 };
 
-export type SmaCenterBackup = {
+export type SmaCenterBackup = CardBackup & {
   format: typeof BACKUP_FORMAT;
   exportedAt: string;
   users: BackupUser[];
@@ -106,6 +112,7 @@ export async function createFullBackup(): Promise<SmaCenterBackup> {
     ]);
 
   return {
+    ...(await exportCards()),
     format: BACKUP_FORMAT,
     exportedAt: new Date().toISOString(),
     users: usersResult.results,
@@ -191,6 +198,7 @@ export function parseBackup(value: unknown): SmaCenterBackup {
           });
         })();
   return {
+    ...parseCardBackup(input, userIds, dashboards),
     dashboards,
     format: BACKUP_FORMAT,
     exportedAt:
@@ -210,6 +218,8 @@ export async function restoreFullBackup(
   const db = getRawDb();
   if (mode === "replace") {
     await db.batch([
+      db.prepare("DELETE FROM card_states"),
+      db.prepare("DELETE FROM card_definitions"),
       db.prepare("DELETE FROM dashboards"),
       db.prepare("DELETE FROM agent_credentials"),
       db.prepare("DELETE FROM resources"),
@@ -304,6 +314,8 @@ export async function restoreFullBackup(
         ),
     ),
   ];
+
+  statements.push(...cardRestoreStatements(backup));
 
   for (let offset = 0; offset < statements.length; offset += 50) {
     await db.batch(statements.slice(offset, offset + 50));

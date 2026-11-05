@@ -1,0 +1,26 @@
+{
+  "format": "sma-card-package-v1",
+  "id": "example.countdown",
+  "name": "倒数日",
+  "version": "1.0.0",
+  "description": "纪念日、截止日期与倒计时",
+  "icon": "calendar",
+  "renderer": "countdown",
+  "size": "medium",
+  "fields": [
+    {
+      "key": "target",
+      "label": "目标时间",
+      "type": "date",
+      "default": "2030-01-01T00:00:00+08:00",
+      "required": true
+    },
+    {
+      "key": "caption",
+      "label": "说明",
+      "type": "text",
+      "default": "距离目标日期",
+      "required": false
+    }
+  ]
+}

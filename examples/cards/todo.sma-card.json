@@ -1,0 +1,19 @@
+{
+  "format": "sma-card-package-v1",
+  "id": "example.todo",
+  "name": "待办",
+  "version": "1.0.0",
+  "description": "勾选完成、添加和删除事项",
+  "icon": "check",
+  "renderer": "todo",
+  "size": "medium",
+  "fields": [
+    {
+      "key": "items",
+      "label": "初始事项（每行一项）",
+      "type": "textarea",
+      "default": "",
+      "required": false
+    }
+  ]
+}

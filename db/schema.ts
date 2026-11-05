@@ -137,3 +137,29 @@ export const monitorEvents = sqliteTable(
     index("idx_monitor_event_owner").on(table.userId, table.startedAt),
   ],
 );
+
+export const cardDefinitions = sqliteTable(
+  "card_definitions",
+  {
+    userId: text("user_id").notNull(),
+    id: text("id").notNull(),
+    manifest: text("manifest").notNull(),
+    revision: integer("revision").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.id] })],
+);
+export const cardStates = sqliteTable(
+  "card_states",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => dashboards.id, { onDelete: "cascade" }),
+    widgetId: text("widget_id").notNull(),
+    userId: text("user_id").notNull(),
+    state: text("state").notNull().default("{}"),
+    revision: integer("revision").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.boardId, table.widgetId] })],
+);
