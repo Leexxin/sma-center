@@ -251,6 +251,8 @@ docker compose logs --tail=100 sma-center
 curl -fsS http://192.168.33.124:8080/healthz
 ```
 
+服务器根目录的 `releases/` 仅用于现场历史源码快照，已从 Docker 上下文、TypeScript 和 ESLint 范围排除；不要把快照当作当前源码参与构建，也不要删除快照来解决类型错误。新源码备份应放到 `/root/sma-center-backups/`。`app/sma/releases/` 是当前版本中心页面源码，必须保留。
+
 归档覆盖不会删除新版本已移除的旧文件。发布前审查 `git diff --name-status 旧版本..新版本`，对删除/重命名文件逐项处理；不能用目录级清空或无保护 rsync --delete 处理生产目录。若更新包含配置路径、Compose 卷名或端口变化，先按现场配置调整；不能把恢复覆盖配置丢掉。
 
 构建失败时旧容器通常仍运行，先检查日志，不反复清卷。构建成功并启动后还要浏览器验证登录、原数据、收藏、设置和 SMA。保存本次提交号、旧镜像标签及完整备份路径。
