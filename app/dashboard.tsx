@@ -1,4 +1,6 @@
 "use client";
+import Link from "next/link";
+import Image from "next/image";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -9,9 +11,10 @@ import {
   ChevronRight,
   CircleDot,
   Cloud,
-  Command,
   Cpu,
   DatabaseBackup,
+  Database,
+  Layers,
   Download,
   FileJson,
   Activity,
@@ -116,6 +119,8 @@ const emptyDraft: ResourceDraft = {
 };
 
 const kindMeta: Record<ResourceKind, { label: string; icon: typeof Wrench }> = {
+  database: { label: "数据库", icon: Database },
+  middleware: { label: "中间件", icon: Layers },
   tool: { label: "工具", icon: Wrench },
   site: { label: "站点", icon: Globe2 },
   server: { label: "服务器", icon: Server },
@@ -156,7 +161,7 @@ async function readError(response: Response) {
   return payload?.error ?? "操作失败，请稍后重试。";
 }
 
-export default function Dashboard({ initialResources, initialPreferences, user, canManageBackups }: DashboardProps) {
+export default function Dashboard({ initialResources, initialPreferences, canManageBackups }: DashboardProps) {
   const [resources, setResources] = useState(initialResources);
   const [preferences, setPreferences] = useState(initialPreferences);
   const [filter, setFilter] = useState<"all" | ResourceKind>("all");
@@ -180,6 +185,8 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
   const backupInputRef = useRef<HTMLInputElement>(null);
 
   const counts = useMemo(() => ({
+    database: resources.filter((item) => item.kind === "database").length,
+    middleware: resources.filter((item) => item.kind === "middleware").length,
     tool: resources.filter((item) => item.kind === "tool").length,
     site: resources.filter((item) => item.kind === "site").length,
     server: resources.filter((item) => item.kind === "server").length,
@@ -267,7 +274,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       setAgentToken("");
       setClearAgentToken(false);
       setResourceOpen(false);
-      toast.success(editingId ? "已更新记录" : "已添加到主页");
+      toast.success(editingId ? "已更新记录" : "已添加资源");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "保存失败，请稍后重试。");
     } finally {
@@ -304,7 +311,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       const saved = await response.json() as Preferences;
       setPreferences(saved);
       setSettingsOpen(false);
-      toast.success("主页外观已更新");
+      toast.success("设置已更新");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "设置保存失败。");
     } finally {
@@ -326,7 +333,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       anchor.download = name;
       anchor.click();
       URL.revokeObjectURL(url);
-      toast.success("完整备份已下载");
+      toast.success("JSON 备份已下载");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "备份生成失败。");
     } finally {
@@ -432,7 +439,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
         category: resource.category, status: resource.status, note: resource.note, pinned: !resource.pinned,
         cpuUsage: resource.cpuUsage, temperature: resource.temperature, memoryUsage: resource.memoryUsage, diskUsage: resource.diskUsage, agentUrl: resource.agentUrl,
       }, resource.id);
-      toast.success(resource.pinned ? "已取消收藏" : "已加入个性化收藏");
+      toast.success(resource.pinned ? "已取消收藏" : "已加入收藏");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "收藏状态更新失败。");
     }
@@ -457,7 +464,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       void Promise.resolve(modelContext.registerTool({
         name: "create_resource",
         title: "添加导航记录",
-        description: "向当前用户主页添加一个工具、站点或服务器。",
+        description: "向当前用户主页添加一个工具、站点、服务器、数据库或中间件。",
         inputSchema: {
           type: "object",
           properties: {
@@ -511,8 +518,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
     return () => { active = false; window.clearInterval(interval); };
   }, [monitoredServers]);
 
-  const initials = user.displayName.trim().slice(0, 2).toUpperCase();
-  const currentLabel = filter === "all" ? preferences.pageName : kindMeta[filter].label + (filter === "tool" ? "库" : "");
+  const currentLabel = filter === "all" ? "资源" : kindMeta[filter].label + (filter === "tool" ? "库" : "");
   const editingCredentialConfigured = Boolean(editingId && resources.find((item) => item.id === editingId)?.credentialConfigured);
 
   function renderCard(resource: Resource, favorite = false) {
@@ -562,55 +568,38 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       <Toaster position="top-right" richColors />
       <div className={`app-shell theme-${preferences.theme} accent-${preferences.accent} density-${preferences.density} ${preferences.sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="brand-mark"><span>S</span><div><strong>sma-center</strong><small>PERSONAL HUB</small></div></div>
-        <nav aria-label="主导航" className="side-nav">
+        <div className="brand-mark"><Image unoptimized src="/sma-icon.png" alt="" width="36" height="36" /><div><strong>SMA Center</strong><small>资源管理</small></div></div>
+        <nav aria-label="主导航" className="side-nav"><Link href="/" className="workspace-back">← 面板</Link>
           <button className={filter === "all" ? "active" : ""} aria-current={filter === "all" ? "page" : undefined} title="总览" onClick={() => selectView("all")}><LayoutDashboard /><b>总览</b></button>
           {preferences.navOrder.map((kind, index) => { const item = kindMeta[kind]; const Icon = item.icon; return <div className="nav-sort-row" key={kind}><button className={filter === kind ? "active" : ""} aria-current={filter === kind ? "page" : undefined} title={item.label} onClick={() => selectView(kind)}><Icon /><b>{kind === "tool" ? "工具库" : item.label}</b><span>{counts[kind]}</span></button>{sortingNav && !preferences.sidebarCollapsed && <div className="nav-move"><button aria-label={`上移${item.label}`} disabled={index === 0} onClick={() => moveNav(kind, -1)}><ArrowUp /></button><button aria-label={`下移${item.label}`} disabled={index === preferences.navOrder.length - 1} onClick={() => moveNav(kind, 1)}><ArrowDown /></button></div>}</div>; })}
         </nav>
         <div className="sidebar-spacer" />
         <button className="settings-button" title="SMA 版本中心与安装运维命令" onClick={() => window.location.assign('/sma/releases')}><Download /><b>SMA 版本中心</b></button>
         <div className="sidebar-tools"><button className={`settings-button ${sortingNav ? "active" : ""}`} title="菜单排序" onClick={() => setSortingNav(!sortingNav)}><ListRestart /><b>菜单排序</b></button><button className="collapse-button" title={preferences.sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-label={preferences.sidebarCollapsed ? "展开侧栏" : "收起侧栏"} onClick={() => updateSidebar({ ...preferences, sidebarCollapsed: !preferences.sidebarCollapsed })}>{preferences.sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</button></div>
-        <button className="settings-button" title="主页设置" onClick={() => { setSettingsDraft(preferences); setSettingsOpen(true); }}><Settings2 /><b>主页设置</b></button>
+        <button className="settings-button" title="设置" onClick={() => { setSettingsDraft(preferences); setSettingsOpen(true); }}><Settings2 /><b>设置</b></button>
         <button className="settings-button" title="统一登录业务应用" onClick={() => window.location.assign('/applications')}><ShieldCheck /><b>业务应用</b></button>
         <button className="settings-button" title="安全设置与登录有效期" onClick={() => window.location.assign('/security')}><ShieldCheck /><b>安全设置</b></button>
-        <div className="user-card">
-          <div className="avatar">{initials}</div>
-          <div><strong>{user.displayName}</strong><small>单用户 · 验证器保护</small></div>
-          <ShieldCheck />
-        </div>
       </aside>
 
       <main className="main-panel">
         <header className="topbar">
-          <div className="mobile-brand"><span>S</span><strong>sma-center</strong></div>
+          <div className="mobile-brand"><Image unoptimized src="/sma-icon.png" alt="" width="30" height="30" /><Link href="/">面板</Link></div>
           <div className="search-wrap"><Search /><Input ref={searchInputRef} aria-label="搜索工具、站点和服务器" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、分类、网址…" />{query ? <button className="clear-search" aria-label="清空搜索" onClick={() => { setQuery(""); searchInputRef.current?.focus(); }}><X /></button> : <kbd><span>⌘</span><span>K</span></kbd>}</div>
-          <div className="topbar-actions"><button className="theme-toggle" onClick={toggleTheme} aria-label={preferences.theme === "dark" ? "切换到明亮模式" : "切换到黑暗模式"} title={preferences.theme === "dark" ? "明亮模式" : "黑暗模式"}>{preferences.theme === "dark" ? <Sun /> : <Moon />}</button><Button onClick={() => startAdd()} className="primary-action"><Plus />添加记录</Button></div>
+          <div className="topbar-actions"><button className="theme-toggle" onClick={toggleTheme} aria-label={preferences.theme === "dark" ? "切换到明亮模式" : "切换到黑暗模式"} title={preferences.theme === "dark" ? "明亮模式" : "黑暗模式"}>{preferences.theme === "dark" ? <Sun /> : <Moon />}</button><Button onClick={() => startAdd()} className="primary-action"><Plus />添加资源</Button></div>
         </header>
 
         <div className="content-wrap">
-          {filter === "all" && <><section className="welcome-row">
-            <div><p className="eyebrow">个人工作台 · {new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date())}</p><h1>{preferences.greeting}</h1><p>你的常用入口都在这里，保持专注，快速出发。</p></div>
-            <div className="health-chip"><span className="pulse-dot" /><strong>{counts.healthy}</strong><span>项服务运行正常</span></div>
-          </section>
-
-          <section className="overview-grid" aria-label="资源概览">
-            <div className="overview-card featured"><div className="overview-icon"><Command /></div><span>已收录</span><strong>{resources.length}</strong><small>个常用入口</small><ChevronRight /></div>
-            <div className="overview-card"><div className="overview-icon"><Wrench /></div><span>工具</span><strong>{counts.tool}</strong><small>效率与开发</small></div>
-            <div className="overview-card"><div className="overview-icon"><Globe2 /></div><span>站点</span><strong>{counts.site}</strong><small>服务与内容</small></div>
-            <div className="overview-card"><div className="overview-icon"><Cloud /></div><span>服务器</span><strong>{counts.server}</strong><small>节点与存储</small></div>
-          </section></>}
-
-          <section className="favorites-section" aria-labelledby="favorites-title">
-            <div className="section-head compact-head"><div><p className="eyebrow">PINNED FOR YOU</p><h2 id="favorites-title">个性化收藏</h2><p>{filter === "all" ? "最常用的入口，始终放在最顺手的位置" : `${currentLabel}中已收藏的入口`}</p></div><span className="favorite-count"><Star />{favorites.length}</span></div>
+          {favorites.length > 0 && <section className="favorites-section" aria-labelledby="favorites-title">
+            <div className="section-head compact-head"><div><h2 id="favorites-title">收藏</h2><p>{filter === "all" ? "" : `${currentLabel}中已收藏的入口`}</p></div><span className="favorite-count"><Star />{favorites.length}</span></div>
             {favorites.length ? <div className="favorites-grid">{favorites.map((resource) => renderCard(resource, true))}</div> : <button className="favorite-empty" onClick={() => startAdd(filter === "all" ? "tool" : filter)}><Star /><span><strong>这里还没有收藏</strong><small>点击任意卡片上的五角星，即可固定到这里</small></span></button>}
-          </section>
+          </section>}
 
           <section className="library-section">
             <div className="section-head">
               <div><h2>{currentLabel}</h2><p>{filter === "all" ? "全部入口" : `全部${kindMeta[filter].label}`}</p></div>
               <Tabs value={filter} onValueChange={(value) => setFilter(value as "all" | ResourceKind)}>
                 <TabsList className="filter-tabs">
-                  <TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="tool">工具</TabsTrigger><TabsTrigger value="site">站点</TabsTrigger><TabsTrigger value="server">服务器</TabsTrigger>
+                  <TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="tool">工具</TabsTrigger><TabsTrigger value="site">站点</TabsTrigger><TabsTrigger value="server">服务器</TabsTrigger><TabsTrigger value="database">数据库</TabsTrigger><TabsTrigger value="middleware">中间件</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
@@ -620,10 +609,10 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
             {filtered.length ? (
               <div className="resource-grid">
                 {filtered.map((resource) => renderCard(resource))}
-                <button className="add-card" onClick={() => startAdd(filter === "all" ? "tool" : filter)}><span><Plus /></span><strong>添加新入口</strong><small>工具、站点或服务器</small></button>
+                <button className="add-card" onClick={() => startAdd(filter === "all" ? "tool" : filter)}><span><Plus /></span><strong>添加资源</strong><small>工具、站点、服务器、数据库或中间件</small></button>
               </div>
             ) : (
-              <div className="empty-state"><div><Search /></div><h3>没有找到匹配项</h3><p>换个关键词，或直接添加一条新记录。</p><Button onClick={() => startAdd()}><Plus />添加记录</Button></div>
+              <div className="empty-state"><div><Search /></div><h3>没有找到匹配项</h3><p>换个关键词，或直接添加一条新记录。</p><Button onClick={() => startAdd()}><Plus />添加资源</Button></div>
             )}
           </section>
         </div>
@@ -631,9 +620,9 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
 
       <Dialog open={resourceOpen} onOpenChange={setResourceOpen}>
         <DialogContent className="form-dialog">
-          <DialogHeader><DialogTitle>{editingId ? "编辑记录" : "添加到主页"}</DialogTitle><DialogDescription>保存后会同步到你的个人空间，其他用户无法看到。</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? "编辑记录" : "添加资源"}</DialogTitle><DialogDescription>管理资源地址、分类和连接配置。</DialogDescription></DialogHeader>
           <div className="form-grid">
-            <div className="field"><Label htmlFor="kind">类型</Label><Select value={draft.kind} onValueChange={(value) => setDraft({ ...draft, kind: value as ResourceKind })}><SelectTrigger id="kind"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tool">工具</SelectItem><SelectItem value="site">站点</SelectItem><SelectItem value="server">服务器</SelectItem></SelectContent></Select></div>
+            <div className="field"><Label htmlFor="kind">类型</Label><Select value={draft.kind} onValueChange={(value) => setDraft({ ...draft, kind: value as ResourceKind })}><SelectTrigger id="kind"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tool">工具</SelectItem><SelectItem value="site">站点</SelectItem><SelectItem value="server">服务器</SelectItem><SelectItem value="database">数据库</SelectItem><SelectItem value="middleware">中间件</SelectItem></SelectContent></Select></div>
             <div className="field"><Label htmlFor="status">状态</Label><Select value={draft.status} onValueChange={(value) => setDraft({ ...draft, status: value as ResourceStatus })}><SelectTrigger id="status"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="online">运行中</SelectItem><SelectItem value="warning">需关注</SelectItem><SelectItem value="offline">已离线</SelectItem><SelectItem value="unknown">未检查</SelectItem></SelectContent></Select></div>
             <div className="field full"><Label htmlFor="name">名称</Label><Input id="name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：家庭服务器" /></div>
             <div className="field full"><Label htmlFor="url">网址</Label><Input id="url" type="url" value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} placeholder="https://" /></div>
@@ -653,7 +642,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>删除这条记录？</AlertDialogTitle><AlertDialogDescription>删除后无法恢复，但不会影响对应的网站或服务器本身。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={handleDelete}>确认删除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="form-dialog settings-dialog"><DialogHeader><DialogTitle>自定义主页</DialogTitle><DialogDescription>自定义你的个人工作台。</DialogDescription></DialogHeader>
+        <DialogContent className="form-dialog settings-dialog"><DialogHeader><DialogTitle>设置</DialogTitle><DialogDescription>主题、显示与备份。</DialogDescription></DialogHeader>
           <div className="settings-form">
             <div className="field"><Label htmlFor="page-name">主页名称</Label><Input id="page-name" value={settingsDraft.pageName} onChange={(e) => setSettingsDraft({ ...settingsDraft, pageName: e.target.value })} /></div>
             <div className="field"><Label htmlFor="greeting">欢迎语</Label><Input id="greeting" value={settingsDraft.greeting} onChange={(e) => setSettingsDraft({ ...settingsDraft, greeting: e.target.value })} /></div>
@@ -661,9 +650,9 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
             <div className="field"><Label>强调色</Label><div className="color-options">{(["cyan", "violet", "orange"] as Accent[]).map((accent) => <button key={accent} aria-label={`选择 ${accent} 强调色`} className={`${accent} ${settingsDraft.accent === accent ? "selected" : ""}`} onClick={() => setSettingsDraft({ ...settingsDraft, accent })}>{settingsDraft.accent === accent && <Check />}</button>)}</div></div>
             <div className="field"><Label>信息密度</Label><div className="density-options">{(["comfortable", "compact"] as Density[]).map((density) => <button key={density} className={settingsDraft.density === density ? "selected" : ""} onClick={() => setSettingsDraft({ ...settingsDraft, density })}><SlidersHorizontal />{density === "comfortable" ? "舒适" : "紧凑"}</button>)}</div></div>
             {canManageBackups && <section className="backup-panel" aria-labelledby="backup-title">
-              <div className="backup-panel-head"><div className="backup-icon"><DatabaseBackup /></div><div><strong id="backup-title">全站备份与还原</strong><span>主页设置和全部导航记录；验证器配置需完整数据卷备份</span></div><ShieldCheck /></div>
+              <div className="backup-panel-head"><div className="backup-icon"><DatabaseBackup /></div><div><strong id="backup-title">备份与还原</strong><span>设置和全部导航记录；验证器配置需完整数据卷备份</span></div><ShieldCheck /></div>
               <p>备份明确排除 SMA Token、密码和会话凭据。覆盖还原会清除现有 SMA 凭据，之后需逐台重新配置。</p>
-              <div className="backup-actions"><Button type="button" variant="outline" onClick={handleBackupDownload} disabled={saving}><Download />{saving ? "生成中…" : "下载完整备份"}</Button><Button type="button" variant="outline" onClick={() => backupInputRef.current?.click()}><Upload />选择备份还原</Button></div>
+              <div className="backup-actions"><Button type="button" variant="outline" onClick={handleBackupDownload} disabled={saving}><Download />{saving ? "生成中…" : "下载 JSON 备份"}</Button><Button type="button" variant="outline" onClick={() => backupInputRef.current?.click()}><Upload />选择备份还原</Button></div>
               <input ref={backupInputRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => handleBackupFile(event.target.files?.[0])} />
             </section>}
           </div>
@@ -671,7 +660,7 @@ export default function Dashboard({ initialResources, initialPreferences, user, 
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={restoreOpen} onOpenChange={setRestoreOpen}><AlertDialogContent className="restore-dialog"><AlertDialogHeader><AlertDialogTitle>还原全站数据</AlertDialogTitle><AlertDialogDescription>请确认备份范围并选择还原方式。</AlertDialogDescription></AlertDialogHeader>{backupPreview && <div className="restore-preview"><div className="restore-file"><FileJson /><span><strong>{backupPreview.name}</strong><small>{backupPreview.exportedAt ? new Date(backupPreview.exportedAt).toLocaleString("zh-CN") : "sma-center 完整备份"}</small></span></div><div className="restore-counts"><span><b>{backupPreview.users}</b> 位用户</span><span><b>{backupPreview.preferences}</b> 份主页设置</span><span><b>{backupPreview.resources}</b> 条导航记录</span></div><p><strong>合并还原</strong>会保留当前 SMA 凭据；<strong>覆盖还原</strong>会清除全部凭据，且备份文件不会恢复它们。</p></div>}<AlertDialogFooter><AlertDialogCancel disabled={restoring}>取消</AlertDialogCancel><Button variant="outline" disabled={restoring} onClick={() => handleRestore("merge")}>合并还原</Button><AlertDialogAction variant="destructive" disabled={restoring} onClick={() => handleRestore("replace")}>{restoring ? "还原中…" : "覆盖还原"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <AlertDialog open={restoreOpen} onOpenChange={setRestoreOpen}><AlertDialogContent className="restore-dialog"><AlertDialogHeader><AlertDialogTitle>还原全站数据</AlertDialogTitle><AlertDialogDescription>请确认备份范围并选择还原方式。</AlertDialogDescription></AlertDialogHeader>{backupPreview && <div className="restore-preview"><div className="restore-file"><FileJson /><span><strong>{backupPreview.name}</strong><small>{backupPreview.exportedAt ? new Date(backupPreview.exportedAt).toLocaleString("zh-CN") : "sma-center 完整备份"}</small></span></div><div className="restore-counts"><span><b>{backupPreview.users}</b> 位用户</span><span><b>{backupPreview.preferences}</b> 份设置</span><span><b>{backupPreview.resources}</b> 条导航记录</span></div><p><strong>合并还原</strong>会保留当前 SMA 凭据；<strong>覆盖还原</strong>会清除全部凭据，且备份文件不会恢复它们。</p></div>}<AlertDialogFooter><AlertDialogCancel disabled={restoring}>取消</AlertDialogCancel><Button variant="outline" disabled={restoring} onClick={() => handleRestore("merge")}>合并还原</Button><AlertDialogAction variant="destructive" disabled={restoring} onClick={() => handleRestore("replace")}>{restoring ? "还原中…" : "覆盖还原"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       </div>
     </>
   );

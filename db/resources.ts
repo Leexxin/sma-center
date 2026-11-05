@@ -2,7 +2,7 @@ import { getRawDb } from "./index";
 import type { Owner } from "@/app/auth";
 import { credentialMutationStatement, prepareCredentialMutation } from "./agent-credentials";
 
-export type ResourceKind = "tool" | "site" | "server";
+export type ResourceKind = "tool" | "site" | "server" | "database" | "middleware";
 export type ResourceStatus = "online" | "warning" | "offline" | "unknown";
 export type Density = "comfortable" | "compact";
 export type Accent = "cyan" | "violet" | "orange";

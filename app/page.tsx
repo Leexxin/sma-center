@@ -1,10 +1,9 @@
-import Dashboard from "./dashboard";
+import Workspace from "./workspace";
 import { requireOwner } from "./auth";
 import { getPreferences, listResources, recordUser } from "@/db/resources";
-import { isBackupAdmin } from "@/lib/backup-admin";
-
+import { listBoards } from "@/db/dashboards";
+import "./workspace.css";
 export const dynamic = "force-dynamic";
-
 export default async function Home() {
   const user = await requireOwner();
   await recordUser(user);
@@ -12,5 +11,12 @@ export default async function Home() {
     listResources(user.userId),
     getPreferences(user.userId),
   ]);
-  return <Dashboard initialResources={resources} initialPreferences={preferences} user={{ displayName: user.displayName, email: user.email }} canManageBackups={isBackupAdmin(user.email)} />;
+  const boards = await listBoards(user.userId, resources);
+  return (
+    <Workspace
+      initialBoards={boards}
+      resources={resources}
+      initialPreferences={preferences}
+    />
+  );
 }

@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "sma-center · 个人工具站",
-  description: "由验证器动态码保护的个人工具、站点与服务器导航工作台。",
+  title: "SMA Center",
+  description: "资源、指标与事件面板。",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/apple-touch-icon.png",
   },
 };
 

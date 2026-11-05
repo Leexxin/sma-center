@@ -1,5 +1,6 @@
 # sma-center 文档
 
+- [面板与卡片](workspace.md)：布局编辑、自定义卡片、后台采样、历史趋势、事件、迁移和交付边界。
 - [供其他系统转发的 SSO 接入说明](sso-client-integration.md)：固定 HTTP IP 配置、申请注册、开发流程、权限、退出与验收。
 - [统一入口与 SSO 对接手册](sso-integration.md)：中心配置、客户端注册、业务开发、接口、退出、参考程序与验收。
 - [全流程安装与运维手册](installation-and-operations.md)：安装、绑定、使用、升级、备份、恢复、排障与验收。

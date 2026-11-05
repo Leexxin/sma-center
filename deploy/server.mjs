@@ -50,7 +50,7 @@ createServer(async (request, response) => {
     if (oidc && await oidc.handle(request, response, url, session, { form, html, redirect, reply, validOrigin })) return;
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !validOrigin) { reply(403, '表单来源验证失败，请重新打开当前页面后再提交。'); return; }
     if (url.pathname === '/atlas-login' || url.pathname === '/signin-with-chatgpt') { redirect('/login'); return; }
-    if (url.pathname === '/favicon.svg') { reply(200, readFileSync(join(process.cwd(), 'public/favicon.svg')), 'image/svg+xml'); return; }
+    if (['/favicon.svg', '/favicon.png', '/sma-icon.png', '/apple-touch-icon.png'].includes(url.pathname) && ['GET', 'HEAD'].includes(request.method)) { reply(200, readFileSync(join(process.cwd(), 'public', url.pathname.slice(1))), url.pathname.endsWith('.svg') ? 'image/svg+xml' : 'image/png'); return; }
     if (url.pathname.startsWith('/setup')) {
       if (auth.state.bound) { redirect('/login'); return; }
       if (!['GET', 'POST'].includes(request.method)) { reply(405, 'Method not allowed'); return; }
