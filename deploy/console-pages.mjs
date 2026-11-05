@@ -38,11 +38,12 @@ export function nativePage(title, subtitle, content, options = {}) {
     ["resources", "资源", "resources"],
     ["events", "事件", "events"],
     ["sources", "数据连接", "signal"],
-    ["gallery", "卡片库", "grid"],
+    ["gallery", "卡片管理", "grid"],
+    ["plugins", "插件", "resources"],
   ]
     .map(
       ([view, label, symbol]) =>
-        `<a href="/?view=${view}">${icon(symbol)}${label}</a>`,
+        `<a href="${view === "resources" ? "/resources" : view === "gallery" ? "/cards" : view === "plugins" ? "/plugins" : `/?view=${view}`}">${icon(symbol)}${label}</a>`,
     )
     .join("");
   const bottom = [

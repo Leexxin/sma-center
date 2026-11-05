@@ -32,6 +32,8 @@ export default function ConsoleSettings({
       name: string;
       resources: number;
       boards: number;
+      definitions: number;
+      states: number;
     } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   async function update(p: Preferences) {
@@ -81,6 +83,10 @@ export default function ConsoleSettings({
         name: file.name,
         resources: data.resources.length,
         boards: Array.isArray(data.dashboards) ? data.dashboards.length : 0,
+        definitions: Array.isArray(data.cardDefinitions)
+          ? data.cardDefinitions.length
+          : 0,
+        states: Array.isArray(data.cardStates) ? data.cardStates.length : 0,
       });
     } catch (e) {
       toast.error((e as Error).message);
@@ -204,7 +210,8 @@ export default function ConsoleSettings({
             <div className="ui-backup-preview">
               <strong>{preview.name}</strong>
               <p>
-                {preview.resources} 项资源 · {preview.boards} 个面板
+                {preview.resources} 项资源 · {preview.boards} 个面板 ·{" "}
+                {preview.definitions} 份卡片定义 · {preview.states} 份卡片内容
               </p>
               <p>
                 覆盖还原会删除现有资源与面板，并清除 SMA 凭据，需要重新配置

@@ -1,0 +1,26 @@
+{
+  "format": "sma-card-package-v1",
+  "id": "example.clock",
+  "name": "时钟",
+  "version": "1.0.0",
+  "description": "指定时区的时间与日期",
+  "icon": "clock",
+  "renderer": "clock",
+  "size": "medium",
+  "fields": [
+    {
+      "key": "timezone",
+      "label": "时区",
+      "type": "timezone",
+      "default": "Asia/Shanghai",
+      "required": true
+    },
+    {
+      "key": "seconds",
+      "label": "显示秒",
+      "type": "boolean",
+      "default": true,
+      "required": false
+    }
+  ]
+}

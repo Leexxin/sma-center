@@ -78,17 +78,28 @@ export default function ConsoleShell({
     }
   }
   const viewLink = (view: ConsoleView, label: string, icon: ReactNode) =>
-    onView ? (
+    view === "resources" || view === "gallery" ? (
+      <Link
+        key={view}
+        href={view === "resources" ? "/resources" : "/cards"}
+        aria-current={
+          current === (view === "resources" ? "resources" : "cards")
+            ? "page"
+            : undefined
+        }
+      >
+        {icon}
+        {label}
+      </Link>
+    ) : onView ? (
       <button key={view} onClick={() => onView(view)}>
         {icon}
         {label}
-        {view === "resources" && <span>{context.resourceCount}</span>}
       </button>
     ) : (
       <Link key={view} href={`/?view=${view}`}>
         {icon}
         {label}
-        {view === "resources" && <span>{context.resourceCount}</span>}
       </Link>
     );
   const boards = context.boards.map((board) =>
@@ -113,6 +124,17 @@ export default function ConsoleShell({
     <>
       <Toaster position="top-right" />
       <div
+        onClickCapture={(event) => {
+          const link = (event.target as Element).closest("a");
+          if (
+            editing &&
+            link?.getAttribute("href") &&
+            !window.confirm("放弃未保存的面板布局并离开？")
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
         className={`workspace ws-${preferences.theme} ws-${preferences.density} ws-accent-${preferences.accent}`}
       >
         <aside className="ws-sidebar">
@@ -148,7 +170,14 @@ export default function ConsoleShell({
             {viewLink("resources", "资源", <Layers size={17} />)}
             {viewLink("events", "事件", <Bell size={17} />)}
             {viewLink("sources", "数据连接", <Activity size={17} />)}
-            {viewLink("gallery", "卡片库", <LayoutGrid size={17} />)}
+            {viewLink("gallery", "卡片管理", <LayoutGrid size={17} />)}
+            <Link
+              href="/plugins"
+              aria-current={current === "plugins" ? "page" : undefined}
+            >
+              <Layers size={17} />
+              插件
+            </Link>
           </nav>
           <div className="ws-sidebar-bottom">
             <Link
@@ -233,7 +262,8 @@ export default function ConsoleShell({
                   {viewLink("resources", "资源", <Layers size={15} />)}
                   {viewLink("events", "事件", <Bell size={15} />)}
                   {viewLink("sources", "数据连接", <Activity size={15} />)}
-                  {viewLink("gallery", "卡片库", <LayoutGrid size={15} />)}
+                  {viewLink("gallery", "卡片管理", <LayoutGrid size={15} />)}
+                  <Link href="/plugins">插件</Link>
                   <Link href="/sma/releases">版本中心</Link>
                   <a href="/applications">业务应用</a>
                   <a href="/security">安全设置</a>

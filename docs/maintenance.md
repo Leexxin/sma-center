@@ -12,6 +12,7 @@
 | SMA 指标、服务发现、凭据处理 | SMA 配置、网络访问、可见指标和故障判断 |
 | lib/release-sync.mjs、版本中心页面/API | sma-release-center.md、手册配置/备份项，以及同步安全回归测试 |
 | 页面功能、收藏分类、主题、布局设置 | 使用说明、JSON 备份覆盖范围 |
+| 卡片类型、字段 schema、插件包、独立内容存储 | card-plugins.md、workspace.md、示例包、JSON/整卷备份及回滚兼容性 |
 | 服务器地址、卷、目录、镜像、网络与部署版本 | 手册中的环境信息及 deployment-status.md |
 | OIDC 协议、客户端注册、统一应用入口、业务端示例 | sso-integration.md、手册环境/代理/备份项、协议与浏览器回归 |
 | 新增文档、迁移文档路径 | docs/README.md 及所有入口链接 |

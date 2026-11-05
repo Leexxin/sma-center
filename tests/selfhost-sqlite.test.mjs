@@ -10,9 +10,9 @@ const { env: { DB } } = await import('../deploy/sqlite-env.mjs');
 
 test('all schema migrations are applied exactly once', async () => {
   const rows = await DB.prepare('SELECT name FROM sma_center_migrations').all();
-  assert.equal(rows.results.length, 8);
+  assert.equal(rows.results.length, 9);
   const tables = await DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-  for (const name of ['resources', 'users', 'user_preferences', 'agent_credentials']) assert.ok(tables.results.some(r => r.name === name));
+  for (const name of ['resources', 'users', 'user_preferences', 'agent_credentials', 'card_definitions', 'card_states']) assert.ok(tables.results.some(r => r.name === name));
 });
 test('a failing batch rolls back all writes', async () => {
   await DB.exec('CREATE TABLE test_atomic (id TEXT PRIMARY KEY)');
@@ -42,7 +42,7 @@ test('legacy database migration keeps user data and does not replay migrations',
   try {
     const migrated = (await import('../deploy/sqlite-env.mjs?legacy-migration')).env.DB;
     assert.equal(await migrated.prepare('SELECT display_name FROM users WHERE user_id=?').bind('existing-user').first('display_name'), 'Existing user');
-    assert.equal((await migrated.prepare('SELECT * FROM sma_center_migrations').all()).results.length, 8);
+    assert.equal((await migrated.prepare('SELECT * FROM sma_center_migrations').all()).results.length, 9);
     assert.ok(existsSync(join(directory, 'sma-center.sqlite')));
     assert.ok(!existsSync(join(directory, 'atlas.sqlite')));
   } finally { process.env.SMA_CENTER_DATA_DIR = previous; }

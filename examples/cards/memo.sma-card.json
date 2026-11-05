@@ -1,0 +1,19 @@
+{
+  "format": "sma-card-package-v1",
+  "id": "example.memo",
+  "name": "备忘录",
+  "version": "1.0.0",
+  "description": "可直接编辑并保存的便签",
+  "icon": "note",
+  "renderer": "memo",
+  "size": "medium",
+  "fields": [
+    {
+      "key": "text",
+      "label": "初始内容",
+      "type": "textarea",
+      "default": "",
+      "required": false
+    }
+  ]
+}

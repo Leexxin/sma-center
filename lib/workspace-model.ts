@@ -1,3 +1,4 @@
+import { cardIcons, type CardIconName } from "./card-package.ts";
 export const widgetTypes = [
   "resource",
   "metric",
@@ -5,6 +6,7 @@ export const widgetTypes = [
   "links",
   "note",
   "events",
+  "plugin",
 ] as const;
 export type WidgetType = (typeof widgetTypes)[number];
 export const metricLabels = {
@@ -23,6 +25,9 @@ export type Widget = {
   metric: MetricKey;
   text: string;
   threshold: number;
+  icon?: string;
+  pluginId?: string;
+  values?: Record<string, string | number | boolean>;
 };
 export type Board = {
   id: string;
@@ -36,6 +41,7 @@ export const widgetMeta: Record<
   WidgetType,
   { name: string; description: string }
 > = {
+  plugin: { name: "增强卡片", description: "插件与自定义卡片" },
   resource: { name: "资源", description: "服务器、站点、数据库或中间件" },
   metric: { name: "指标", description: "单个数值与阈值" },
   timeseries: { name: "趋势", description: "CPU、内存或系统盘历史" },
@@ -76,6 +82,34 @@ export function parseWidgets(value: unknown): Widget[] {
       !w.resourceId
     )
       throw new Error("RESOURCE_REQUIRED");
+    if (
+      w.icon !== undefined &&
+      (typeof w.icon !== "string" ||
+        !cardIcons.includes(w.icon as CardIconName))
+    )
+      throw new Error("INVALID_WIDGETS");
+    if (
+      w.type === "plugin" &&
+      (typeof w.pluginId !== "string" ||
+        !/^[a-z][a-z0-9.-]{2,79}$/.test(w.pluginId))
+    )
+      throw new Error("INVALID_WIDGETS");
+    if (
+      w.values !== undefined &&
+      (!w.values ||
+        typeof w.values !== "object" ||
+        Array.isArray(w.values) ||
+        Object.keys(w.values).length > 20 ||
+        Object.entries(w.values).some(
+          ([k, v]) =>
+            !/^[a-z][a-z0-9_]{0,39}$/.test(k) ||
+            ["constructor", "prototype"].includes(k) ||
+            !["string", "number", "boolean"].includes(typeof v) ||
+            (typeof v === "string" && v.length > 4000) ||
+            (typeof v === "number" && !Number.isFinite(v)),
+        ))
+    )
+      throw new Error("INVALID_WIDGETS");
     ids.add(w.id);
     return {
       version: 1,
@@ -87,6 +121,16 @@ export function parseWidgets(value: unknown): Widget[] {
       metric: w.metric as MetricKey,
       text: w.text,
       threshold: w.threshold,
+      ...(w.icon !== undefined ? { icon: w.icon as string } : {}),
+      ...(w.type === "plugin"
+        ? {
+            pluginId: w.pluginId as string,
+            values: (w.values || {}) as Record<
+              string,
+              string | number | boolean
+            >,
+          }
+        : {}),
     };
   });
 }
@@ -139,14 +183,12 @@ export function starterWidgets(
       type: "events" as const,
       size: "wide" as const,
     },
-    ...resources
-      .slice(0, 8)
-      .map((r) => ({
-        ...base,
-        id: crypto.randomUUID(),
-        type: "resource" as const,
-        resourceId: r.id,
-      })),
+    ...resources.slice(0, 8).map((r) => ({
+      ...base,
+      id: crypto.randomUUID(),
+      type: "resource" as const,
+      resourceId: r.id,
+    })),
     {
       ...base,
       id: crypto.randomUUID(),

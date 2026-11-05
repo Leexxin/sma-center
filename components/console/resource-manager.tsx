@@ -91,7 +91,9 @@ export function ResourceEditor({
   onClose,
   onSaved,
   onDeleted,
+  categories = [],
 }: {
+  categories?: string[];
   resource: Resource | null;
   preferences: Preferences;
   boards: Board[];
@@ -190,6 +192,11 @@ export function ResourceEditor({
               void save();
             }}
           >
+            <datalist id="resource-categories">
+              {categories.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
             <div className="ui-form-grid">
               <label>
                 类型
@@ -209,6 +216,7 @@ export function ResourceEditor({
               <label>
                 分类
                 <input
+                  list="resource-categories"
                   maxLength={40}
                   value={draft.category}
                   onChange={(e) =>
@@ -217,23 +225,9 @@ export function ResourceEditor({
                 />
               </label>
             </div>
-            <label>
-              记录状态
-              <select
-                value={draft.status}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    status: e.target.value as ResourceWrite["status"],
-                  })
-                }
-              >
-                <option value="unknown">未检查</option>
-                <option value="online">运行中（手动）</option>
-                <option value="warning">需关注（手动）</option>
-                <option value="offline">离线（手动）</option>
-              </select>
-            </label>
+            <p className="ui-muted">
+              状态由连接器自动上报；未接入上报的资源显示未检查。
+            </p>
             <label>
               名称
               <input

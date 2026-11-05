@@ -1,0 +1,19 @@
+{
+  "format": "sma-card-package-v1",
+  "id": "example.fields",
+  "name": "自定义信息",
+  "version": "1.0.0",
+  "description": "独立设计字段与展示内容",
+  "icon": "layout",
+  "renderer": "fields",
+  "size": "medium",
+  "fields": [
+    {
+      "key": "content",
+      "label": "内容",
+      "type": "textarea",
+      "default": "",
+      "required": false
+    }
+  ]
+}
