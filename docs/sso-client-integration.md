@@ -14,7 +14,7 @@
 | 用户信息 | `http://192.168.33.124:8080/oidc/userinfo` |
 | 令牌内省 | `http://192.168.33.124:8080/oidc/introspect` |
 | 令牌撤销 | `http://192.168.33.124:8080/oidc/revoke` |
-| 统一应用目录 | `http://192.168.33.124:8080/applications` |
+| 统一应用目录 | `http://192.168.33.124:8080/resources?kind=application` |
 | 登录模式 | OIDC `authorization_code`，`response_type=code` |
 | Scope / PKCE / 签名 | `openid profile` / 强制 `S256` / `RS256` |
 | 客户端认证 | 推荐 `client_secret_basic`，也支持 `client_secret_post`，二选一 |

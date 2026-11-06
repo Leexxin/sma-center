@@ -9,7 +9,6 @@ import {
   Download,
   LayoutGrid,
   Layers,
-  Link as LinkIcon,
   Menu,
   Moon,
   Plus,
@@ -188,13 +187,6 @@ export default function ConsoleShell({
               版本中心
             </Link>
             <a
-              aria-current={current === "applications" ? "page" : undefined}
-              href="/applications"
-            >
-              <LinkIcon size={16} />
-              业务应用
-            </a>
-            <a
               aria-current={current === "security" ? "page" : undefined}
               href="/security"
             >
@@ -265,7 +257,6 @@ export default function ConsoleShell({
                   {viewLink("gallery", "卡片管理", <LayoutGrid size={15} />)}
                   <Link href="/plugins">插件</Link>
                   <Link href="/sma/releases">版本中心</Link>
-                  <a href="/applications">业务应用</a>
                   <a href="/security">安全设置</a>
                   {viewLink("settings", "设置", <Settings size={15} />)}
                 </div>

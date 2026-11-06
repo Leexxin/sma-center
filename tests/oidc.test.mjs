@@ -126,7 +126,8 @@ test('LAN HTTP IP issuer and callbacks support the complete flow and exact URL c
   const f = fixture(t, { issuer: center, callback: app + '/auth/callback' });
   const metadata = (await f.call('/.well-known/openid-configuration')).json;
   assert.equal(metadata.issuer, center); assert.equal(metadata.token_endpoint, center + '/oidc/token');
-  assert((await f.call('/applications')).body.includes(app + '/login'));
+  assert.equal((await f.call('/applications')).location, '/resources?kind=application');
+  assert.equal((await f.call('/api/applications')).json.applications[0].url, app + '/login');
   const code = await f.code(), token = await f.exchange(code); assert.equal(token.status, 200);
   const claims = JSON.parse(Buffer.from(token.json.id_token.split('.')[1], 'base64url')); assert.equal(claims.iss, center);
   assert.equal((await f.call('/oidc/userinfo', { headers: { authorization: 'Bearer ' + token.json.access_token } })).json.sub, 'selfhost:admin');
@@ -134,4 +135,17 @@ test('LAN HTTP IP issuer and callbacks support the complete flow and exact URL c
   for (const invalid of ['javascript:alert(1)', 'ftp://192.168.33.81/callback', 'http://user:pass@192.168.33.81/callback', app + '/auth/callback#fragment']) {
     f.clients[0].redirect_uris = [invalid]; f.save(); assert.throws(() => f.provider.clients());
   }
+});
+
+test('application catalog requires authentication and exposes only public entry fields', async t => {
+  const f = fixture(t);
+  assert.equal((await f.call('/api/applications', { loggedIn: false })).status, 401);
+  assert.equal((await f.call('/api/applications', { method: 'POST' })).status, 405);
+  const result = (await f.call('/api/applications')).json;
+  assert.equal(result.enabled, true);
+  assert.deepEqual(result.applications[0], { id: 'app', name: 'Test <App>', url: 'https://app.example.test/login' });
+  assert(!JSON.stringify(result).includes('secret_sha256'));
+  assert(!JSON.stringify(result).includes('redirect_uris'));
+  f.clients.length = 0; f.save();
+  assert.deepEqual((await f.call('/api/applications')).json.applications, []);
 });

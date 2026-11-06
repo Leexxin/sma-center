@@ -1,4 +1,5 @@
 "use client";
+import CollectionStatus from "@/components/console/collection-status";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -81,6 +82,7 @@ type Sample = {
   payload: Partial<Record<MetricKey, number | null>> & {
     sourceTimestamp?: string;
     agentVersion?: string;
+    errors?: { collector: string; code: string }[];
   };
 };
 type Event = {
@@ -693,10 +695,11 @@ export default function Workspace({
       const sample = samples.get(r.id);
       return (
         <>
-          <div className={`ws-state ${state.className}`}>
-            <span className="ws-dot" />
-            {state.label}
-          </div>
+          <CollectionStatus
+            className={`ws-state ${state.className}`}
+            label={state.label}
+            errors={sample?.payload.errors}
+          />
           {r.kind === "server" ? (
             <>
               <div className="ws-metrics">
@@ -742,7 +745,7 @@ export default function Workspace({
           className={`ws-value-state ${v != null && v >= w.threshold ? "warning" : ""}`}
         >
           {v == null
-            ? status(r).label
+            ? <CollectionStatus label={status(r).label} errors={samples.get(r.id)?.payload.errors} />
             : v >= w.threshold
               ? `超过 ${w.threshold}% 阈值`
               : `阈值 ${w.threshold}%`}
@@ -1376,7 +1379,10 @@ export default function Workspace({
                   <Server size={17} />
                   <div>
                     <strong>{r.name}</strong>
-                    <small>{status(r).label}</small>
+                    <CollectionStatus
+                      label={status(r).label}
+                      errors={samples.get(r.id)?.payload.errors}
+                    />
                   </div>
                   <button
                     className="ws-text-link"
@@ -1422,10 +1428,11 @@ export default function Workspace({
           </DialogHeader>
           {detail && (
             <>
-              <div className={`ws-state ${status(detail).className}`}>
-                <span className="ws-dot" />
-                {status(detail).label}
-              </div>
+              <CollectionStatus
+                className={`ws-state ${status(detail).className}`}
+                label={status(detail).label}
+                errors={samples.get(detail.id)?.payload.errors}
+              />
               <p>{detail.description}</p>
               {detail.kind === "server" && (
                 <>

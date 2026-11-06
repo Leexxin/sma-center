@@ -76,7 +76,7 @@ test(
             },
           ],
           disks: [],
-          errors: [],
+          errors: [{ collector: "disk", code: "permission_denied" }],
         }),
       );
     });
@@ -101,7 +101,10 @@ test(
       }),
       { mode: 0o600 },
     );
-    writeFileSync(join(directory, "oidc-clients.json"), "[]", { mode: 0o600 });
+    writeFileSync(join(directory, "oidc-clients.json"), JSON.stringify([{
+      client_id: "qa-app", name: "QA Business App", entry_url: origin + "/business-login",
+      redirect_uris: [origin + "/business-callback"], secret_sha256: "a".repeat(64),
+    }]), { mode: 0o600 });
     const children = [];
     let socket;
     const errors = [];
@@ -241,6 +244,7 @@ test(
           "Object.defineProperty(Crypto.prototype,'randomUUID',{value:undefined,configurable:true})",
       });
       await call("Runtime.enable");
+      await call("Emulation.setFocusEmulationEnabled", { enabled: true });
       await call("Page.navigate", { url: origin + "/login" });
       await until("!!document.querySelector('#code')");
       await evaluate(
@@ -255,6 +259,13 @@ test(
         ),
         false,
       );
+      const catalog = await api("/api/applications");
+      assert.deepEqual(catalog.body.applications, [{ id: "qa-app", name: "QA Business App", url: origin + "/business-login" }]);
+      await call("Page.navigate", { url: origin + "/applications" });
+      await until("location.pathname==='/resources' && location.search==='?kind=application' && document.querySelector('.resources-grid')?.textContent.includes('QA Business App')");
+      assert.equal(await evaluate("!!document.querySelector('.ws-sidebar a[href=\"/applications\"]')"), false);
+      await call("Page.navigate", { url: origin + "/" });
+      await until("!!document.querySelector('.workspace') && document.body.textContent.includes('更新于')");
       const geometry = await evaluate(
         "(()=>{const s=document.querySelector('.ws-sidebar').getBoundingClientRect(),m=document.querySelector('.ws-main').getBoundingClientRect();return {sidebar:s.width,main:m.width,left:m.left,top:m.top,sideRight:s.right}})()",
       );
@@ -268,6 +279,14 @@ test(
           geometry.top < 5,
         "desktop geometry: " + JSON.stringify(geometry),
       );
+      // Client-side query navigation must reopen events after returning to the overview.
+      for (let visit = 0; visit < 2; visit++) {
+        await call("Page.navigate", { url: origin + "/resources" });
+        await until("location.pathname==='/resources' && !!document.querySelector('.resources-grid')");
+        await evaluate("document.querySelector('.ws-sidebar a[href=\"/?view=events\"]').click()");
+        await until("!!document.querySelector('[role=dialog]') && document.querySelector('[role=dialog]').textContent.includes('事件')");
+        await evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+      }
       // The old resource entry opens management inside the overview frame.
       await call("Page.navigate", { url: origin + "/resources" });
       await until(
@@ -769,7 +788,7 @@ test(
         ["/", "总览"],
         ["/servers/" + resource.body.id, "QA Node"],
         ["/security", "安全设置"],
-        ["/applications", "业务应用"],
+        ["/resources?kind=application", "业务应用"],
         ["/resources", "资源"],
         ["/cards", "卡片管理"],
         ["/plugins", "插件"],
@@ -777,7 +796,7 @@ test(
       ]) {
         await call("Page.navigate", { url: origin + path });
         await until(
-          `location.pathname===${JSON.stringify(path)} && !!document.querySelector('.workspace.ws-light.ws-accent-violet') && document.body.textContent.includes(${JSON.stringify(heading)})`,
+          `location.pathname+location.search===${JSON.stringify(path)} && !!document.querySelector('.workspace.ws-light.ws-accent-violet') && document.body.textContent.includes(${JSON.stringify(heading)})`,
         );
         assert.equal(
           await evaluate("document.querySelectorAll('.ws-sidebar').length"),
@@ -834,7 +853,19 @@ test(
       );
       assert(sample);
       assert.equal(sample.payload.memoryPercent, 40);
-      assert.equal(sample.quality, "valid");
+      assert.equal(sample.quality, "partial");
+      assert.deepEqual(sample.payload.errors, [{ collector: "disk", code: "permission_denied" }]);
+      await call("Page.navigate", { url: origin + "/resources" });
+      await until("!!document.querySelector('.resource-tile .collection-status')");
+      await call("Page.bringToFront");
+      await evaluate("document.querySelector('.resource-tile .collection-status').focus()");
+      await until("!!document.querySelector('[role=tooltip]') && document.querySelector('[role=tooltip]').textContent.includes('disk · permission_denied')");
+      await capture("collector-details");
+      await evaluate("document.querySelector('.resource-tile .collection-status').blur()");
+      await until("!document.querySelector('[role=tooltip]')");
+      const trigger = await evaluate("(()=>{const r=document.querySelector('.resource-tile .collection-status').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+      await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...trigger });
+      await until("!!document.querySelector('[role=tooltip]') && document.querySelector('[role=tooltip]').textContent.includes('permission_denied')");
       const history = await api(
         `/api/observability?resourceId=${resource.body.id}&metric=memoryPercent&hours=1`,
       );
