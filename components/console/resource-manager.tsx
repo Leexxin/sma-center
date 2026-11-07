@@ -1,5 +1,6 @@
 "use client";
-import { useMemo, useState } from "react";
+import SiteIcon from "@/components/console/site-icon";
+import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
   Search,
@@ -107,6 +108,7 @@ export function ResourceEditor({
           kind: resource.kind,
           name: resource.name,
           url: resource.url,
+          siteIcon: resource.siteIcon,
           description: resource.description,
           category: resource.category,
           status: resource.status,
@@ -125,6 +127,36 @@ export function ResourceEditor({
     [typeClear, setTypeClear] = useState(false),
     [busy, setBusy] = useState(false),
     [deleting, setDeleting] = useState(false);
+  const [iconBusy, setIconBusy] = useState(false);
+  const [iconMessage, setIconMessage] = useState("");
+  const [iconRefresh, setIconRefresh] = useState(0);
+  useEffect(() => {
+    if (draft.kind !== "site") return;
+    const url = draft.url.trim();
+    try { if (!["http:", "https:"].includes(new URL(url).protocol)) return; } catch { return; }
+    if (!iconRefresh && resource?.url === url && resource?.siteIcon) return;
+    const controller = new AbortController();
+    let active = true;
+    const timer = setTimeout(async () => {
+      setIconBusy(true);
+      setIconMessage("");
+      try {
+        const response = await fetch("/api/site-icon", {
+          method: "POST", signal: controller.signal,
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }),
+        });
+        const result = await response.json() as { siteIcon: string };
+        if (!response.ok) throw new Error();
+        if (active) {
+          setDraft((current) => current.kind === "site" && current.url.trim() === url ? { ...current, siteIcon: result.siteIcon } : current);
+          setIconMessage(result.siteIcon ? "已采集站点图标" : "未找到可用图标，将使用默认图标。");
+        }
+      } catch {
+        if (active) setIconMessage("图标采集失败，将使用默认图标，可稍后重试。");
+      } finally { if (active) setIconBusy(false); }
+    }, 500);
+    return () => { active = false; clearTimeout(timer); controller.abort(); setIconBusy(false); };
+  }, [draft.kind, draft.url, iconRefresh, resource?.url, resource?.siteIcon]);
   const references = boards.reduce(
     (count, b) =>
       count + b.widgets.filter((w) => w.resourceId === resource?.id).length,
@@ -135,6 +167,7 @@ export function ResourceEditor({
     resource.credentialConfigured &&
     draft.kind !== "server";
   async function save() {
+    if (iconBusy) return;
     setBusy(true);
     try {
       const r = await consoleRequest<Resource>(
@@ -243,10 +276,17 @@ export function ResourceEditor({
                 required
                 type="url"
                 value={draft.url}
-                onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                onChange={(e) => setDraft({ ...draft, url: e.target.value, siteIcon: "" })}
                 placeholder="https://"
               />
             </label>
+            {draft.kind === "site" && (
+              <div className="site-icon-setting">
+                <span className="ws-cardicon"><SiteIcon icon={draft.siteIcon} size={24} /></span>
+                <div><strong>站点图标</strong><p aria-live="polite">{iconBusy ? "正在采集图标…" : iconMessage || (draft.siteIcon ? "已保存站点图标" : "输入站点地址后自动采集")}</p></div>
+                <button type="button" disabled={iconBusy || busy || !draft.url} onClick={() => setIconRefresh((n) => n + 1)}>重新采集</button>
+              </div>
+            )}
             <label>
               说明
               <input
@@ -353,7 +393,7 @@ export function ResourceEditor({
               <button
                 className="ws-primary"
                 type="submit"
-                disabled={busy || (changesCredentialType && !typeClear)}
+                disabled={busy || iconBusy || (changesCredentialType && !typeClear)}
               >
                 {busy ? "保存中…" : "保存资源"}
               </button>
@@ -459,7 +499,7 @@ export default function ResourceManager({
               return (
                 <article key={r.id}>
                   <span className="ws-cardicon">
-                    <Icon size={17} />
+                    {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} size={17} /> : <Icon size={17} />}
                   </span>
                   <button
                     className="ui-resource-name"

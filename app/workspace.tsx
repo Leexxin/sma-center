@@ -1,4 +1,5 @@
 "use client";
+import SiteIcon from "@/components/console/site-icon";
 import CollectionStatus from "@/components/console/collection-status";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -662,7 +663,7 @@ export default function Workspace({
             return (
               <a href={r.url} key={r.id} target="_blank" rel="noreferrer">
                 <span>
-                  <Icon size={19} />
+                  {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} size={19} /> : <Icon size={19} />}
                 </span>
                 {r.name}
                 <ArrowUpRight size={11} />
@@ -697,6 +698,7 @@ export default function Workspace({
         <>
           <CollectionStatus
             className={`ws-state ${state.className}`}
+            tone={state.className}
             label={state.label}
             errors={sample?.payload.errors}
           />
@@ -745,7 +747,7 @@ export default function Workspace({
           className={`ws-value-state ${v != null && v >= w.threshold ? "warning" : ""}`}
         >
           {v == null
-            ? <CollectionStatus label={status(r).label} errors={samples.get(r.id)?.payload.errors} />
+            ? <CollectionStatus tone={status(r).className} label={status(r).label} errors={samples.get(r.id)?.payload.errors} />
             : v >= w.threshold
               ? `超过 ${w.threshold}% 阈值`
               : `阈值 ${w.threshold}%`}
@@ -1064,7 +1066,7 @@ export default function Workspace({
                         }
                       />
                     ) : (
-                      <Icon size={18} />
+                      r?.kind === "site" && w.type === "resource" ? <SiteIcon icon={r.siteIcon} url={r.url} /> : <Icon size={18} />
                     )}
                   </span>
                   <div>
@@ -1380,6 +1382,7 @@ export default function Workspace({
                   <div>
                     <strong>{r.name}</strong>
                     <CollectionStatus
+                      tone={status(r).className}
                       label={status(r).label}
                       errors={samples.get(r.id)?.payload.errors}
                     />
@@ -1430,6 +1433,7 @@ export default function Workspace({
             <>
               <CollectionStatus
                 className={`ws-state ${status(detail).className}`}
+                tone={status(detail).className}
                 label={status(detail).label}
                 errors={samples.get(detail.id)?.payload.errors}
               />

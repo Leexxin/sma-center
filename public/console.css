@@ -1832,3 +1832,23 @@ html[data-theme="dark"][data-accent="orange"] {
 .collection-status { cursor: help; border: 0 !important; background: transparent !important; padding: 0 !important; text-align: left; font: inherit; }
 .collection-details { max-width: min(360px, calc(100vw - 32px)); overflow-wrap: anywhere; }
 .collection-details p { margin-top: 6px; }
+
+.collection-status.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+  border-radius: 50%;
+  color: var(--ws-muted);
+}
+.status-indicator .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #8c94a5; }
+.status-indicator.status-good .status-dot { background: #3cad80; }
+.status-indicator.status-warning .status-dot { background: #e6af38; }
+.site-favicon { display: block; object-fit: contain; flex-shrink: 0; }
+.site-icon-setting { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.site-icon-setting > div { flex: 1; min-width: 0; }
+.site-icon-setting p { margin: 4px 0 0; color: var(--ws-muted); font-size: 12px; }
+.site-icon-setting button { flex-shrink: 0; }

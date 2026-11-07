@@ -1,3 +1,4 @@
+import { normalizeSiteIcon } from "./site-icon-data.ts";
 import type {
   CredentialWrite,
   ResourceKind,
@@ -57,6 +58,7 @@ export function parseResourceInput(value: unknown): ParsedResourceInput {
       name: name.slice(0, 80),
       url,
       kind,
+      ...(body.siteIcon !== undefined ? { siteIcon: normalizeSiteIcon(body.siteIcon) } : {}),
       status,
       description: String(body.description ?? "")
         .trim()

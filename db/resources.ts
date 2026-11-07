@@ -13,6 +13,7 @@ export type Resource = {
   kind: ResourceKind;
   name: string;
   url: string;
+  siteIcon?: string;
   description: string;
   category: string;
   status: ResourceStatus;
@@ -87,7 +88,7 @@ export async function listResources(userId: string): Promise<Resource[]> {
       ),
     );
   }
-  const result = await db.prepare(`SELECT r.id, r.kind, r.name, r.url, r.description, r.category, r.status, r.note, r.pinned,
+  const result = await db.prepare(`SELECT r.id, r.kind, r.name, r.url, r.site_icon AS siteIcon, r.description, r.category, r.status, r.note, r.pinned,
     r.cpu_usage, r.temperature, r.memory_usage, r.disk_usage, r.agent_url AS agentUrl, r.created_at, r.updated_at,
     EXISTS(SELECT 1 FROM agent_credentials c WHERE c.resource_id = r.id AND c.user_id = r.user_id) AS credential_configured
     FROM resources r WHERE r.user_id = ? ORDER BY r.pinned DESC, r.updated_at DESC`).bind(userId).all<ResourceRow>();
@@ -95,7 +96,7 @@ export async function listResources(userId: string): Promise<Resource[]> {
 }
 
 export async function getResource(userId: string, id: string): Promise<Resource | null> {
-  const row = await getRawDb().prepare(`SELECT r.id, r.kind, r.name, r.url, r.description, r.category, r.status, r.note, r.pinned,
+  const row = await getRawDb().prepare(`SELECT r.id, r.kind, r.name, r.url, r.site_icon AS siteIcon, r.description, r.category, r.status, r.note, r.pinned,
     r.cpu_usage, r.temperature, r.memory_usage, r.disk_usage, r.agent_url AS agentUrl, r.created_at, r.updated_at,
     EXISTS(SELECT 1 FROM agent_credentials c WHERE c.resource_id = r.id AND c.user_id = r.user_id) AS credential_configured
     FROM resources r WHERE r.id = ? AND r.user_id = ?`).bind(id, userId).first<ResourceRow>();
@@ -108,12 +109,12 @@ export async function createResource(userId: string, input: ResourceWrite, crede
   const now = Date.now();
   const mutation = await prepareCredentialMutation(userId, id, input.kind === "server" ? credential : { clear: true });
   const insert = db.prepare(`INSERT INTO resources
-    (id, user_id, kind, name, url, description, category, status, note, pinned, cpu_usage, temperature, memory_usage, disk_usage, agent_url, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, userId, input.kind, input.name, input.url, input.description, input.category, input.status, input.note, input.pinned ? 1 : 0, input.cpuUsage, input.temperature, input.memoryUsage, input.diskUsage, input.agentUrl, now, now);
+    (id, user_id, kind, name, url, description, category, status, note, pinned, cpu_usage, temperature, memory_usage, disk_usage, agent_url, created_at, updated_at, site_icon)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, userId, input.kind, input.name, input.url, input.description, input.category, input.status, input.note, input.pinned ? 1 : 0, input.cpuUsage, input.temperature, input.memoryUsage, input.diskUsage, input.agentUrl, now, now, input.kind === "site" ? input.siteIcon || "" : "");
   const credentialStatement = credentialMutationStatement(userId, id, mutation);
   await db.batch([insert, ...(credentialStatement ? [credentialStatement] : [])]);
-  return { id, ...input, credentialConfigured: mutation.type === "set", createdAt: now, updatedAt: now };
+  return { id, ...input, siteIcon: input.kind === "site" ? input.siteIcon || "" : "", credentialConfigured: mutation.type === "set", createdAt: now, updatedAt: now };
 }
 
 export async function updateResource(userId: string, id: string, input: ResourceWrite, credential: CredentialWrite = {}): Promise<Resource | null> {
@@ -123,12 +124,12 @@ export async function updateResource(userId: string, id: string, input: Resource
   const now = Date.now();
   const mutation = await prepareCredentialMutation(userId, id, input.kind === "server" ? credential : { clear: true });
   const update = db.prepare(`UPDATE resources SET kind = ?, name = ?, url = ?, description = ?, category = ?,
-    status = ?, note = ?, pinned = ?, cpu_usage = ?, temperature = ?, memory_usage = ?, disk_usage = ?, agent_url = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
-    .bind(input.kind, input.name, input.url, input.description, input.category, input.status, input.note, input.pinned ? 1 : 0, input.cpuUsage, input.temperature, input.memoryUsage, input.diskUsage, input.agentUrl, now, id, userId);
+    status = ?, note = ?, pinned = ?, cpu_usage = ?, temperature = ?, memory_usage = ?, disk_usage = ?, agent_url = ?, updated_at = ?, site_icon = ? WHERE id = ? AND user_id = ?`)
+    .bind(input.kind, input.name, input.url, input.description, input.category, input.status, input.note, input.pinned ? 1 : 0, input.cpuUsage, input.temperature, input.memoryUsage, input.diskUsage, input.agentUrl, now, input.kind === "site" ? input.siteIcon ?? existing.siteIcon ?? "" : "", id, userId);
   const credentialStatement = credentialMutationStatement(userId, id, mutation);
   await db.batch([update, ...(credentialStatement ? [credentialStatement] : [])]);
   const credentialConfigured = mutation.type === "preserve" ? existing.credentialConfigured : mutation.type === "set";
-  return { id, ...input, credentialConfigured, createdAt: existing.createdAt, updatedAt: now };
+  return { id, ...input, siteIcon: input.kind === "site" ? input.siteIcon ?? existing.siteIcon ?? "" : "", credentialConfigured, createdAt: existing.createdAt, updatedAt: now };
 }
 
 export async function deleteResource(userId: string, id: string) {

@@ -64,6 +64,13 @@
       "when": 1793900307384,
       "tag": "0008_abandoned_terrax",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794031416158,
+      "tag": "0009_legal_mystique",
+      "breakpoints": true
     }
   ]
 }

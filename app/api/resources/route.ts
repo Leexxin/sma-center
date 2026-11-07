@@ -1,3 +1,4 @@
+import { collectSiteIcon } from "@/lib/site-icon";
 import { getOwner } from "@/app/auth";
 import { createResource, listResources } from "@/db/resources";
 import { parseResourceInput } from "@/lib/resource-input";
@@ -21,11 +22,14 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "请先登录。" }, { status: 401 });
   try {
     const input = parseResourceInput(await request.json());
+    if (input.resource.kind === "site" && !input.resource.siteIcon) {
+      input.resource.siteIcon = await collectSiteIcon(input.resource.url).catch(() => "");
+    }
     return Response.json(await createResource(user.userId, input.resource, input.credential), { status: 201 });
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
     if (error instanceof SmaCredentialConfigurationError) return Response.json({ error: error.message, code: error.code }, { status: 503 });
-    if (["INVALID_INPUT", "INVALID_URL", "INVALID_AGENT_URL", "INVALID_CREDENTIAL"].includes(code)) {
+    if (["INVALID_INPUT", "INVALID_URL", "INVALID_AGENT_URL", "INVALID_CREDENTIAL", "INVALID_SITE_ICON"].includes(code)) {
       const message = code === "INVALID_URL" ? "请输入完整有效的网址。" : code === "INVALID_AGENT_URL" ? "请输入有效的 SMA Agent 地址。" : code === "INVALID_CREDENTIAL" ? "SMA 凭据参数无效。" : "请填写名称和网址。";
       return Response.json({ error: message }, { status: 400 });
     }

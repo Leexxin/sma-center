@@ -10,7 +10,7 @@ const { env: { DB } } = await import('../deploy/sqlite-env.mjs');
 
 test('all schema migrations are applied exactly once', async () => {
   const rows = await DB.prepare('SELECT name FROM sma_center_migrations').all();
-  assert.equal(rows.results.length, 9);
+  assert.equal(rows.results.length, 10);
   const tables = await DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
   for (const name of ['resources', 'users', 'user_preferences', 'agent_credentials', 'card_definitions', 'card_states']) assert.ok(tables.results.some(r => r.name === name));
 });
@@ -42,8 +42,33 @@ test('legacy database migration keeps user data and does not replay migrations',
   try {
     const migrated = (await import('../deploy/sqlite-env.mjs?legacy-migration')).env.DB;
     assert.equal(await migrated.prepare('SELECT display_name FROM users WHERE user_id=?').bind('existing-user').first('display_name'), 'Existing user');
-    assert.equal((await migrated.prepare('SELECT * FROM sma_center_migrations').all()).results.length, 9);
+    assert.equal((await migrated.prepare('SELECT * FROM sma_center_migrations').all()).results.length, 10);
     assert.ok(existsSync(join(directory, 'sma-center.sqlite')));
     assert.ok(!existsSync(join(directory, 'atlas.sqlite')));
+  } finally { process.env.SMA_CENTER_DATA_DIR = previous; }
+});
+
+test('site icon upgrade preserves existing resource and credential rows', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'sma-icon-upgrade-'));
+  const old = new DatabaseSync(join(directory, 'sma-center.sqlite'));
+  old.exec('CREATE TABLE sma_center_migrations (name TEXT PRIMARY KEY NOT NULL)');
+  for (const name of readdirSync('drizzle').filter(n => n.endsWith('.sql') && n < '0009').sort()) {
+    old.exec(readFileSync(join('drizzle', name), 'utf8'));
+    old.prepare('INSERT INTO sma_center_migrations VALUES (?)').run(name);
+  }
+  old.prepare("INSERT INTO resources (id,user_id,kind,name,url,created_at,updated_at) VALUES (?,?,?,?,?,?,?)").run('retained-site','owner','site','Retained','https://site.test',1,2);
+  old.prepare('INSERT INTO agent_credentials VALUES (?,?,?,?,?,?)').run('retained-site','owner','fixture-ciphertext','fixture-iv',1,2);
+  const beforeResource = old.prepare('SELECT * FROM resources').get();
+  const beforeCredential = old.prepare('SELECT * FROM agent_credentials').get();
+  old.close();
+  const previous = process.env.SMA_CENTER_DATA_DIR;
+  process.env.SMA_CENTER_DATA_DIR = directory;
+  try {
+    const {env:{DB:upgraded}} = await import('../deploy/sqlite-env.mjs?site-icon-upgrade');
+    const row = await upgraded.prepare('SELECT * FROM resources').first();
+    assert.equal(row.site_icon,'');
+    delete row.site_icon;
+    assert.deepEqual(row,{...beforeResource});
+    assert.deepEqual(await upgraded.prepare('SELECT * FROM agent_credentials').first(),{...beforeCredential});
   } finally { process.env.SMA_CENTER_DATA_DIR = previous; }
 });

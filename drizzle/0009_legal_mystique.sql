@@ -1,0 +1,1 @@
+ALTER TABLE `resources` ADD `site_icon` text DEFAULT '' NOT NULL;
