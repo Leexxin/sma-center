@@ -1,3 +1,5 @@
+import { validResourceAddress } from "../lib/resource-address.ts";
+import { parseDatabaseConnection, type DatabaseConnection } from "../lib/database-connection.ts";
 import { normalizeSiteIcon } from "../lib/site-icon-data.ts";
 import {
   exportCards,
@@ -47,6 +49,8 @@ type BackupResource = {
   diskUsage: number;
   agentUrl: string;
   siteIcon?: string;
+  siteIconSource?: string;
+  database?: DatabaseConnection;
   createdAt: number;
   updatedAt: number;
 };
@@ -94,10 +98,10 @@ export async function createFullBackup(): Promise<SmaCenterBackup> {
         .prepare(
           `SELECT id, user_id AS userId, kind, name, url, description, category, status, note,
       pinned, cpu_usage AS cpuUsage, temperature, memory_usage AS memoryUsage, disk_usage AS diskUsage,
-      agent_url AS agentUrl, site_icon AS siteIcon, created_at AS createdAt, updated_at AS updatedAt FROM resources
+      agent_url AS agentUrl, site_icon AS siteIcon, site_icon_source AS siteIconSource, database_config AS databaseConfig, created_at AS createdAt, updated_at AS updatedAt FROM resources
       ORDER BY user_id, created_at`,
         )
-        .all<Omit<BackupResource, "pinned"> & { pinned: number }>(),
+        .all<Omit<BackupResource, "pinned"> & { pinned: number; databaseConfig: string }>(),
       db
         .prepare(
           "SELECT id, user_id AS userId, name, revision, widgets, created_at AS createdAt, updated_at AS updatedAt FROM dashboards ORDER BY user_id, created_at",
@@ -127,8 +131,8 @@ export async function createFullBackup(): Promise<SmaCenterBackup> {
       ...b,
       widgets: parseWidgets(JSON.parse(b.widgets)),
     })),
-    resources: resourcesResult.results.map((item) => ({
-      ...item,
+    resources: resourcesResult.results.map(({databaseConfig,...item}) => ({
+      ...item, database: databaseConfig && databaseConfig !== "{}" ? parseDatabaseConnection(JSON.parse(databaseConfig)) : undefined,
       pinned: Boolean(item.pinned),
     })),
   };
@@ -224,6 +228,7 @@ export async function restoreFullBackup(
       db.prepare("DELETE FROM card_definitions"),
       db.prepare("DELETE FROM dashboards"),
       db.prepare("DELETE FROM agent_credentials"),
+      db.prepare("DELETE FROM database_credentials"),
       db.prepare("DELETE FROM resources"),
       db.prepare("DELETE FROM user_preferences"),
       db.prepare("DELETE FROM users"),
@@ -272,11 +277,11 @@ export async function restoreFullBackup(
         .prepare(
           `INSERT INTO resources
       (id, user_id, kind, name, url, description, category, status, note, pinned, cpu_usage, temperature,
-       memory_usage, disk_usage, agent_url, created_at, updated_at, site_icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       memory_usage, disk_usage, agent_url, created_at, updated_at, site_icon, site_icon_source, database_config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, kind = excluded.kind, name = excluded.name,
       url = excluded.url, description = excluded.description, category = excluded.category, status = excluded.status,
       note = excluded.note, pinned = excluded.pinned, cpu_usage = excluded.cpu_usage, temperature = excluded.temperature,
-      memory_usage = excluded.memory_usage, disk_usage = excluded.disk_usage, agent_url = excluded.agent_url, site_icon = COALESCE(?, resources.site_icon),
+      memory_usage = excluded.memory_usage, disk_usage = excluded.disk_usage, agent_url = excluded.agent_url, site_icon = COALESCE(?, resources.site_icon), site_icon_source = COALESCE(?, resources.site_icon_source), database_config = COALESCE(?, resources.database_config),
       created_at = excluded.created_at, updated_at = excluded.updated_at`,
         )
         .bind(
@@ -298,9 +303,14 @@ export async function restoreFullBackup(
           item.createdAt,
           item.updatedAt,
           item.siteIcon || "",
+          item.siteIconSource || "",
+          JSON.stringify(item.database || {}),
           item.siteIcon ?? null,
+          item.siteIconSource ?? null,
+          item.database ? JSON.stringify(item.database) : null,
         ),
     ),
+    ...backup.resources.filter(item=>item.kind!=="database").map(item=>db.prepare("DELETE FROM database_credentials WHERE resource_id = ? AND user_id = ?").bind(item.id,item.userId)),
     ...(backup.dashboards || []).map((b) =>
       db
         .prepare(
@@ -399,10 +409,14 @@ function parseResource(value: unknown): BackupResource {
   const item = value as Record<string, unknown>;
   const url = requiredString(item.url, 2048);
   try {
-    new URL(url);
+    if (!validResourceAddress(url,String(item.kind))) throw new Error();
   } catch {
     throw new Error("INVALID_BACKUP");
   }
+  let database: DatabaseConnection | undefined;
+  try {database = parseDatabaseConnection(item.database);} catch {throw new Error("INVALID_BACKUP");}
+  const siteIconSource = item.siteIconSource === undefined ? undefined : String(item.siteIconSource);
+  if (siteIconSource && !validResourceAddress(siteIconSource,"site")) throw new Error("INVALID_BACKUP");
   let siteIcon: string | undefined;
   try { siteIcon = item.siteIcon === undefined ? undefined : normalizeSiteIcon(item.siteIcon); } catch { throw new Error("INVALID_BACKUP"); }
   return {
@@ -428,6 +442,8 @@ function parseResource(value: unknown): BackupResource {
     diskUsage: finiteNumber(item.diskUsage),
     agentUrl: String(item.agentUrl ?? "").slice(0, 240),
     siteIcon,
+    siteIconSource,
+    database,
     createdAt: finiteNumber(item.createdAt),
     updatedAt: finiteNumber(item.updatedAt),
   };

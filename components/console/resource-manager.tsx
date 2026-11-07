@@ -1,4 +1,6 @@
 "use client";
+import { databaseServices, type DatabaseConnection } from "@/lib/database-connection";
+import { resourceOpenUrl } from "@/lib/resource-address";
 import SiteIcon from "@/components/console/site-icon";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -109,6 +111,8 @@ export function ResourceEditor({
           name: resource.name,
           url: resource.url,
           siteIcon: resource.siteIcon,
+          siteIconSource: resource.siteIconSource,
+          database: resource.database,
           description: resource.description,
           category: resource.category,
           status: resource.status,
@@ -127,14 +131,19 @@ export function ResourceEditor({
     [typeClear, setTypeClear] = useState(false),
     [busy, setBusy] = useState(false),
     [deleting, setDeleting] = useState(false);
+  const [databasePassword, setDatabasePassword] = useState("");
+  const [clearDatabasePassword, setClearDatabasePassword] = useState(false);
+  const database: DatabaseConnection = draft.database || {service:"mysql",host:"",port:3306,username:"",database:"",purpose:""};
+  const updateDatabase = (value: Partial<DatabaseConnection>) => setDraft(current=>({...current,database:{...(current.database || database),...value}}));
   const [iconBusy, setIconBusy] = useState(false);
   const [iconMessage, setIconMessage] = useState("");
   const [iconRefresh, setIconRefresh] = useState(0);
   useEffect(() => {
     if (draft.kind !== "site") return;
     const url = draft.url.trim();
+    const iconSource = draft.siteIconSource;
     try { if (!["http:", "https:"].includes(new URL(url).protocol)) return; } catch { return; }
-    if (!iconRefresh && resource?.url === url && resource?.siteIcon) return;
+    if (!iconRefresh && resource?.url === url && resource?.siteIconSource === iconSource && resource?.siteIcon) return;
     const controller = new AbortController();
     let active = true;
     const timer = setTimeout(async () => {
@@ -143,12 +152,12 @@ export function ResourceEditor({
       try {
         const response = await fetch("/api/site-icon", {
           method: "POST", signal: controller.signal,
-          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }),
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, iconSource }),
         });
         const result = await response.json() as { siteIcon: string };
         if (!response.ok) throw new Error();
         if (active) {
-          setDraft((current) => current.kind === "site" && current.url.trim() === url ? { ...current, siteIcon: result.siteIcon } : current);
+          setDraft((current) => current.kind === "site" && current.url.trim() === url && current.siteIconSource === iconSource ? { ...current, siteIcon: result.siteIcon } : current);
           setIconMessage(result.siteIcon ? "已采集站点图标" : "未找到可用图标，将使用默认图标。");
         }
       } catch {
@@ -156,16 +165,13 @@ export function ResourceEditor({
       } finally { if (active) setIconBusy(false); }
     }, 500);
     return () => { active = false; clearTimeout(timer); controller.abort(); setIconBusy(false); };
-  }, [draft.kind, draft.url, iconRefresh, resource?.url, resource?.siteIcon]);
+  }, [draft.kind, draft.url, draft.siteIconSource, iconRefresh, resource?.url, resource?.siteIcon, resource?.siteIconSource]);
   const references = boards.reduce(
     (count, b) =>
       count + b.widgets.filter((w) => w.resourceId === resource?.id).length,
     0,
   );
-  const changesCredentialType =
-    resource?.kind === "server" &&
-    resource.credentialConfigured &&
-    draft.kind !== "server";
+  const changesCredentialType = !!resource?.credentialConfigured && ["server","database"].includes(resource.kind) && draft.kind !== resource.kind;
   async function save() {
     if (iconBusy) return;
     setBusy(true);
@@ -175,12 +181,14 @@ export function ResourceEditor({
         resource ? "PATCH" : "POST",
         {
           ...draft,
+          ...(draft.kind === "database" ? { database, databasePassword: databasePassword || undefined, clearDatabasePassword } : {}),
           ...(draft.kind === "server"
             ? { agentToken: token || undefined, clearAgentToken: clearToken }
             : {}),
         },
       );
       setToken("");
+      setDatabasePassword("");
       onSaved(r);
       onClose();
       toast.success("资源已保存");
@@ -236,7 +244,7 @@ export function ResourceEditor({
                 <select
                   value={draft.kind}
                   onChange={(e) =>
-                    setDraft({ ...draft, kind: e.target.value as ResourceKind })
+                    setDraft({ ...draft, kind: e.target.value as ResourceKind, ...(e.target.value === "database" && !draft.database ? {database} : {}) })
                   }
                 >
                   {Object.entries(resourceKinds).map(([kind, meta]) => (
@@ -258,9 +266,9 @@ export function ResourceEditor({
                 />
               </label>
             </div>
-            <p className="ui-muted">
+            {draft.kind !== "site" && <p className="ui-muted">
               状态由连接器自动上报；未接入上报的资源显示未检查。
-            </p>
+            </p>}
             <label>
               名称
               <input
@@ -270,16 +278,26 @@ export function ResourceEditor({
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               />
             </label>
-            <label>
+            {draft.kind !== "database" && <label>
               地址
               <input
                 required
-                type="url"
+                type={draft.kind === "server" ? "text" : "url"}
                 value={draft.url}
                 onChange={(e) => setDraft({ ...draft, url: e.target.value, siteIcon: "" })}
-                placeholder="https://"
+                placeholder={draft.kind === "server" ? "192.168.1.10 或 IPv6 地址" : "https://"}
               />
-            </label>
+            </label>}
+            {draft.kind === "site" && <label>业务图标地址（可选）<input type="url" value={draft.siteIconSource || ""} onChange={e=>setDraft({...draft,siteIconSource:e.target.value,siteIcon:""})} placeholder="业务系统的真实 favicon 地址"/><small>经过 SSO 跳转时使用此地址采集业务图标，不使用登录中心图标。</small></label>}
+            {draft.kind === "database" && <fieldset><legend>数据库连接</legend>
+              <div className="ui-form-grid"><label>服务<select value={database.service} onChange={e=>{const service=e.target.value as DatabaseConnection["service"];updateDatabase({service,port:databaseServices[service].port});}}>{Object.entries(databaseServices).map(([key,value])=><option value={key} key={key}>{value.label}</option>)}</select></label><label>端口<input type="number" min={1} max={65535} required value={database.port} onChange={e=>updateDatabase({port:Number(e.target.value)})}/></label></div>
+              <label>主机 / IP<input required value={database.host} onChange={e=>updateDatabase({host:e.target.value})} placeholder="192.168.1.10"/></label>
+              <div className="ui-form-grid"><label>用户<input value={database.username} maxLength={128} onChange={e=>updateDatabase({username:e.target.value})}/></label><label>默认库 / DB<input value={database.database} maxLength={128} onChange={e=>updateDatabase({database:e.target.value})}/></label></div>
+              <label>用途<input value={database.purpose} maxLength={240} onChange={e=>updateDatabase({purpose:e.target.value})}/></label>
+              <label>密码<input type="password" autoComplete="new-password" value={databasePassword} disabled={clearDatabasePassword} onChange={e=>setDatabasePassword(e.target.value)} placeholder={resource?.kind === "database" && resource.credentialConfigured ? "留空以保留已配置密码" : "输入数据库密码"}/></label>
+              <small>密码仅写入加密存储，不回显或导出到 JSON 备份。连接信息保存不代表已建立数据库监控。</small>
+              {resource?.kind === "database" && resource.credentialConfigured && <label className="ui-check"><input type="checkbox" checked={clearDatabasePassword} onChange={e=>{setClearDatabasePassword(e.target.checked);setDatabasePassword("");}}/>清除已保存密码</label>}
+            </fieldset>}
             {draft.kind === "site" && (
               <div className="site-icon-setting">
                 <span className="ws-cardicon"><SiteIcon icon={draft.siteIcon} size={24} /></span>
@@ -320,13 +338,13 @@ export function ResourceEditor({
                     disabled={clearToken}
                     onChange={(e) => setToken(e.target.value)}
                     placeholder={
-                      resource?.credentialConfigured
+                      resource?.kind === "server" && resource.credentialConfigured
                         ? "留空保留现有 Token"
                         : "输入 Token"
                     }
                   />
                 </label>
-                {resource?.credentialConfigured && (
+                {resource?.kind === "server" && resource.credentialConfigured && (
                   <label className="ui-check">
                     <input
                       type="checkbox"
@@ -352,7 +370,7 @@ export function ResourceEditor({
                   checked={typeClear}
                   onChange={(e) => setTypeClear(e.target.checked)}
                 />
-                确认更改类型并清除原 Agent 凭据
+                确认更改类型并清除原连接凭据
               </label>
             )}
             <label>
@@ -499,7 +517,7 @@ export default function ResourceManager({
               return (
                 <article key={r.id}>
                   <span className="ws-cardicon">
-                    {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} size={17} /> : <Icon size={17} />}
+                    {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} iconSource={r.siteIconSource} size={17} /> : <Icon size={17} />}
                   </span>
                   <button
                     className="ui-resource-name"
@@ -527,7 +545,7 @@ export default function ResourceManager({
                   </button>
                   {r.pinned && <Star size={13} className="ui-muted" />}
                   <a
-                    href={r.url}
+                    href={resourceOpenUrl(r)}
                     aria-label={`打开 ${r.name}`}
                     target="_blank"
                     rel="noreferrer"

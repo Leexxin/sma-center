@@ -17,6 +17,7 @@ export default async function Home({
   }>;
 }) {
   const navigation = await searchParams;
+  if (navigation.view === "events") redirect("/events");
   if (navigation.view === "resources") redirect("/resources");
   if (navigation.view === "gallery") redirect("/cards");
   const user = await requireOwner();

@@ -250,6 +250,7 @@ test(
       await call("Runtime.enable");
       await call("Emulation.setFocusEmulationEnabled", { enabled: true });
       await call("Page.navigate", { url: origin + "/login" });
+      await until("document.readyState===\'complete\'");
       await until("!!document.querySelector('#code')");
       await evaluate(
         `document.querySelector('#code').value=${JSON.stringify(totp(seed, Math.floor(Date.now() / 30000)))};document.querySelector('form').requestSubmit()`,
@@ -266,9 +267,11 @@ test(
       const catalog = await api("/api/applications");
       assert.deepEqual(catalog.body.applications, [{ id: "qa-app", name: "QA Business App", url: origin + "/business-login" }]);
       await call("Page.navigate", { url: origin + "/applications" });
+      await until("document.readyState===\'complete\'");
       await until("location.pathname==='/resources' && location.search==='?kind=application' && document.querySelector('.resources-grid')?.textContent.includes('QA Business App')");
       assert.equal(await evaluate("!!document.querySelector('.ws-sidebar a[href=\"/applications\"]')"), false);
       await call("Page.navigate", { url: origin + "/" });
+      await until("document.readyState===\'complete\'");
       await until("!!document.querySelector('.workspace') && document.body.textContent.includes('更新于')");
       const geometry = await evaluate(
         "(()=>{const s=document.querySelector('.ws-sidebar').getBoundingClientRect(),m=document.querySelector('.ws-main').getBoundingClientRect();return {sidebar:s.width,main:m.width,left:m.left,top:m.top,sideRight:s.right}})()",
@@ -283,16 +286,18 @@ test(
           geometry.top < 5,
         "desktop geometry: " + JSON.stringify(geometry),
       );
-      // Client-side query navigation must reopen events after returning to the overview.
+      // Events are a separate page, including repeated navigation from resources.
       for (let visit = 0; visit < 2; visit++) {
         await call("Page.navigate", { url: origin + "/resources" });
+        await until("document.readyState===\'complete\'");
         await until("location.pathname==='/resources' && !!document.querySelector('.resources-grid')");
-        await evaluate("document.querySelector('.ws-sidebar a[href=\"/?view=events\"]').click()");
-        await until("!!document.querySelector('[role=dialog]') && document.querySelector('[role=dialog]').textContent.includes('事件')");
-        await evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+        await evaluate("document.querySelector('.ws-sidebar a[href=\"/events\"]').click()");
+        await until("location.pathname==='/events' && document.querySelector('h1')?.textContent==='事件' && !document.querySelector('.ws-grid') && document.body.textContent.includes('暂无事件')");
+        assert.equal(await evaluate("!!document.querySelector('[role=dialog]')"),false);
       }
       // The old resource entry opens management inside the overview frame.
       await call("Page.navigate", { url: origin + "/resources" });
+      await until("document.readyState===\'complete\'");
       await until(
         "location.pathname==='/resources' && !!document.querySelector('.resources-grid') && !!document.documentElement.dataset.theme",
       );
@@ -333,6 +338,7 @@ test(
         false,
       );
       await call("Page.navigate", { url: origin + "/" });
+      await until("document.readyState===\'complete\'");
       await until(
         "!!document.querySelector('.workspace') && document.body.textContent.includes('更新于') && !document.querySelector('[role=dialog]')",
       );
@@ -452,7 +458,8 @@ test(
       });
       assert.equal(normal.status, 201);
       await call("Page.navigate", { url: origin + "/resources" });
-      await until("[...document.querySelectorAll('.resource-tile')].some(e=>e.textContent.includes('QA Icon Site') && e.querySelector('img.site-favicon')?.naturalWidth===1)");
+      await until("document.readyState===\'complete\'");
+      await until("document.querySelector('.resources-grid')?.textContent.includes('QA Business App') && [...document.querySelectorAll('.resource-tile')].some(e=>e.textContent.includes('QA Icon Site') && e.querySelector('img.site-favicon')?.naturalWidth===1)");
       assert.equal(await evaluate("[...document.querySelectorAll('.resource-tile')].find(e=>e.textContent.includes('QA Icon Site')).querySelector('img.site-favicon').naturalWidth"), 1);
       await evaluate("document.querySelector('[aria-label=\"编辑 QA Icon Site\"]').click()");
       await until("document.querySelector('.site-icon-setting img.site-favicon')?.naturalWidth===1");
@@ -461,8 +468,45 @@ test(
       await until("document.querySelector('.site-icon-setting').textContent.includes('已采集站点图标')");
       await evaluate("document.querySelector('.ws-config').requestSubmit()");
       await until("!document.querySelector('.site-icon-setting')");
+      const ipResource = await api("/api/resources", "POST", {kind:"server",name:"QA IP Server",url:"192.0.2.10"});
+      assert.equal(ipResource.status,201);
+      await call("Page.navigate", {url:origin+"/resources"});
+      await until("document.readyState===\'complete\'");
+      await until("!!document.querySelector('[aria-label=\"编辑 QA IP Server\"]')");
+      await evaluate("document.querySelector('[aria-label=\"编辑 QA IP Server\"]').click()");
+      await until("!!document.querySelector('.ws-config')");
+      assert.equal(await evaluate("[...document.querySelectorAll('.ws-config input')].find(i=>i.value==='192.0.2.10').type"),"text");
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until("!document.querySelector('.ws-config')");
+      const databasePassword="isolated-qa-database-password";
+      const dbConnection={service:"mysql",host:"192.0.2.80",port:3306,username:"app",database:"appdb",purpose:"test connection"};
+      const databaseResource=await api("/api/resources","POST",{kind:"database",name:"QA Secure Database",database:dbConnection,databasePassword});
+      assert.equal(databaseResource.status,201);
+      assert.equal(databaseResource.body.credentialConfigured,true);
+      assert.deepEqual(databaseResource.body.database,dbConnection);
+      assert(!JSON.stringify(databaseResource.body).includes(databasePassword));
+      const unchangedDatabase=await api("/api/resources/"+databaseResource.body.id,"PATCH",{...databaseResource.body,name:"QA Secure Database"});
+      assert.equal(unchangedDatabase.status,200);
+      assert.equal(unchangedDatabase.body.credentialConfigured,true);
+      const {DatabaseSync}=await import("node:sqlite");
+      const {decryptCredential}=await import("../lib/credential-crypto.ts");
+      const verifyDb=new DatabaseSync(join(directory,"sma-center.sqlite"),{readOnly:true});
+      const encrypted=verifyDb.prepare("SELECT * FROM database_credentials WHERE resource_id=?").get(databaseResource.body.id);
+      assert(encrypted && encrypted.ciphertext!==databasePassword);
+      assert.equal(await decryptCredential({ciphertext:encrypted.ciphertext,iv:encrypted.iv,keyVersion:encrypted.key_version},Buffer.alloc(32,6).toString("base64"),"selfhost:admin","database:"+databaseResource.body.id),databasePassword);
+      verifyDb.close();
+      await call("Page.navigate",{url:origin+"/resources"});
+      await until("document.readyState===\'complete\'");
+      await until("!!document.querySelector('[aria-label=\"编辑 QA Secure Database\"]')");
+      assert.equal(await evaluate("[...document.querySelectorAll('.resource-tile')].find(e=>e.textContent.includes('QA Icon Site')).querySelector('.status-indicator')===null"),true);
+      await evaluate("document.querySelector('[aria-label=\"编辑 QA Secure Database\"]').click()");
+      await until("!!document.querySelector('input[autocomplete=\"new-password\"]')");
+      assert.equal(await evaluate("document.querySelector('input[autocomplete=\"new-password\"]').value"),"");
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until("!document.querySelector('.ws-config')");
       // Editing metadata must preserve an existing write-only credential.
       await call("Page.navigate", { url: origin + "/?view=resources" });
+      await until("document.readyState===\'complete\'");
       await until(
         "document.querySelector('.resources-grid')?.textContent.includes('QA Node') && !!document.documentElement.dataset.theme",
       );
@@ -485,6 +529,7 @@ test(
       const baselineBoards = (await api("/api/dashboards")).body;
       const mainBoard = baselineBoards[0];
       await call("Page.navigate", { url: origin + "/?view=gallery" });
+      await until("document.readyState===\'complete\'");
       await until(
         "location.pathname==='/cards' && !!document.documentElement.dataset.theme && !!document.querySelector('.card-type-grid')",
       );
@@ -497,6 +542,7 @@ test(
         mainBoard.revision,
       );
       await call("Page.navigate", { url: origin + "/" });
+      await until("document.readyState===\'complete\'");
       await until("document.body.textContent.includes('更新于')");
       await evaluate(
         "[...document.querySelectorAll('button')].find(b=>b.textContent==='添加卡片').click()",
@@ -523,6 +569,7 @@ test(
       const file = join(directory, "qa-clock.sma-card.json");
       writeFileSync(file, JSON.stringify(manifest));
       await call("Page.navigate", { url: origin + "/plugins" });
+      await until("document.readyState===\'complete\'");
       await until(
         "location.pathname==='/plugins' && !!document.documentElement.dataset.theme",
       );
@@ -559,6 +606,7 @@ test(
         400,
       );
       await call("Page.navigate", { url: origin + "/?add=qa.clock" });
+      await until("document.readyState===\'complete\'");
       await until(
         "!!document.querySelector('.ws-config') && document.body.textContent.includes('更新于')",
       );
@@ -568,6 +616,7 @@ test(
       );
       const makeExtra = async (id) => {
         await call("Page.navigate", { url: origin + "/?add=" + id });
+        await until("document.readyState===\'complete\'");
         await until(
           "!!document.querySelector('.ws-config') && document.body.textContent.includes('更新于')",
         );
@@ -679,6 +728,7 @@ test(
         200,
       );
       await call("Page.navigate", { url: origin + "/" });
+      await until("document.readyState===\'complete\'");
       await until(
         "document.body.textContent.includes('更新于') && document.body.textContent.includes('卡片字段已变更')",
       );
@@ -711,11 +761,14 @@ test(
       assert.equal(backup.body.resources.find(r => r.id === site.body.id).siteIcon, site.body.siteIcon);
       assert(backup.body.dashboards.some((b) => b.name === "测试面板"));
       assert(!JSON.stringify(backup.body).includes("ciphertext"));
+      assert(!JSON.stringify(backup.body).includes(databasePassword));
+      assert.deepEqual(backup.body.resources.find(r=>r.id===databaseResource.body.id).database,dbConnection);
       const restored = await api("/api/backup", "POST", {
         backup: backup.body,
         mode: "merge",
       });
       assert.equal(restored.status, 200);
+      assert.equal(restored.body.resources.find(r=>r.id===databaseResource.body.id).credentialConfigured,true);
       assert.equal(restored.body.resources.find(r => r.id === site.body.id).siteIcon, site.body.siteIcon);
       const legacyBackup = structuredClone(backup.body);
       legacyBackup.resources.forEach(r => { delete r.siteIcon; });
@@ -784,6 +837,7 @@ test(
       );
       // Global theme is persisted across React and native form pages.
       await call("Page.navigate", { url: origin + "/?view=settings" });
+      await until("document.readyState===\'complete\'");
       await until("!!document.querySelector('.ui-settings')");
       assert.equal(
         await evaluate(
@@ -822,11 +876,13 @@ test(
         ["/security", "安全设置"],
         ["/resources?kind=application", "业务应用"],
         ["/resources", "资源"],
+        ["/events", "事件"],
         ["/cards", "卡片管理"],
         ["/plugins", "插件"],
         ["/not-a-page", "页面未找到"],
       ]) {
         await call("Page.navigate", { url: origin + path });
+        await until("document.readyState===\'complete\'");
         await until(
           `location.pathname+location.search===${JSON.stringify(path)} && !!document.querySelector('.workspace.ws-light.ws-accent-violet') && document.body.textContent.includes(${JSON.stringify(heading)})`,
         );
@@ -862,6 +918,7 @@ test(
       });
       // Remove the UI from the tab; sampling must continue in the gateway process.
       await call("Page.navigate", { url: origin + "/security" });
+      await until("document.readyState===\'complete\'");
       await until("location.pathname==='/security'");
       const requestsWithoutUI = requests;
       for (let i = 0; i < 1600 && requests < requestsWithoutUI + 4; i++)
@@ -876,6 +933,7 @@ test(
           log,
       );
       await call("Page.navigate", { url: origin + "/" });
+      await until("document.readyState===\'complete\'");
       await until(
         "!!document.querySelector('.workspace') && document.body.textContent.includes('更新于')",
       );
@@ -888,6 +946,7 @@ test(
       assert.equal(sample.quality, "partial");
       assert.deepEqual(sample.payload.errors, [{ collector: "disk", code: "permission_denied" }]);
       await call("Page.navigate", { url: origin + "/resources" });
+      await until("document.readyState===\'complete\'");
       await until("!!document.querySelector('.resource-tile .status-warning') && !!document.querySelector('.resource-tile .status-good')");
       assert.equal(await evaluate("document.querySelector('.resource-tile .status-warning').textContent.trim()"), "");
       assert.equal(await evaluate("getComputedStyle(document.querySelector('.resource-tile .status-warning .status-dot')).backgroundColor"), "rgb(230, 175, 56)");
@@ -917,6 +976,7 @@ test(
         ),
       );
       await call("Page.navigate", { url: origin + "/" });
+      await until("document.readyState===\'complete\'");
       await until("!!document.querySelector('.workspace')");
       await call("Emulation.setDeviceMetricsOverride", {
         width: 390,

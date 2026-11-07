@@ -62,7 +62,11 @@ async function request(url: string, signal: AbortSignal, fetcher: typeof fetch) 
       await response.body?.cancel();
       const location = response.headers.get("location");
       if (!location) throw new Error("INVALID_REDIRECT");
-      url = webUrl(location, url); continue;
+      const destination = webUrl(location, url);
+      const from = new URL(url), to = new URL(destination);
+      const upgrade = from.protocol === "http:" && to.protocol === "https:" && from.hostname === to.hostname && !from.port && !to.port;
+      if (from.origin !== to.origin && !upgrade) throw new Error("CROSS_ORIGIN_ICON_REDIRECT");
+      url = destination; continue;
     }
     if (!response.ok) { await response.body?.cancel(); throw new Error("ICON_UNAVAILABLE"); }
     return { response, url };
@@ -80,10 +84,10 @@ function imageType(bytes: Buffer): string | null {
   if (/^<svg[\s>]/i.test(svg) && !/<!DOCTYPE|<!ENTITY|<script|<foreignObject|\bon\w+\s*=|(?:href|src)\s*=/i.test(svg)) return "svg+xml";
   return null;
 }
-export async function collectSiteIcon(input: string, fetcher: typeof fetch = fetch) {
+export async function collectSiteIcon(input: string, fetcher: typeof fetch = fetch, iconSource?: string) {
   const page = webUrl(input), signal = AbortSignal.timeout(8000);
-  let candidates = [new URL("/favicon.ico", page).href];
-  try {
+  let candidates = iconSource ? [webUrl(iconSource)] : [new URL("/favicon.ico", page).href];
+  if (!iconSource) try {
     const { response, url } = await request(page, signal, fetcher);
     candidates = iconCandidates((await limitedBody(response, MAX_PAGE_BYTES)).toString("utf8"), url);
   } catch { if (signal.aborted) return ""; }

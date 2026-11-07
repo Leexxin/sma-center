@@ -32,3 +32,5 @@ React 页面通过 `ConsoleShell` 共用框架；原生 TOTP、应用目录、OI
 ## 验证边界
 
 执行 `npm test`、`npm run lint`、`npm run build`；原生浏览器回归使用 `SMA_CENTER_BROWSER_TEST=1 npm test`，全部使用临时卷、测试认证和模拟 Agent。覆盖资源新增与加入面板、旧入口跳转、主题在 React/原生页面间同步、桌面及手机不溢出，并保留版本同步、TOTP 和 OIDC 回归。隔离模拟数据不等于真实数据库/中间件监控，也不等于物理手机或外部 SSO 客户端验收。实际上线结果另见[部署核对记录](deployment-status.md)。
+
+事件导航已改为独立 `/events` 页面，旧 `/?view=events` 兼容跳转，不再通过总览承载事件窗口。最新资源连接和图标行为见[面板说明](workspace.md)。

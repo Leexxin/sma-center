@@ -77,12 +77,12 @@ export default function ConsoleShell({
     }
   }
   const viewLink = (view: ConsoleView, label: string, icon: ReactNode) =>
-    view === "resources" || view === "gallery" ? (
+    view === "resources" || view === "gallery" || view === "events" ? (
       <Link
         key={view}
-        href={view === "resources" ? "/resources" : "/cards"}
+        href={view === "resources" ? "/resources" : view === "events" ? "/events" : "/cards"}
         aria-current={
-          current === (view === "resources" ? "resources" : "cards")
+          current === (view === "resources" ? "resources" : view === "events" ? "events" : "cards")
             ? "page"
             : undefined
         }

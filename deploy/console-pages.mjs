@@ -43,7 +43,7 @@ export function nativePage(title, subtitle, content, options = {}) {
   ]
     .map(
       ([view, label, symbol]) =>
-        `<a href="${view === "resources" ? "/resources" : view === "gallery" ? "/cards" : view === "plugins" ? "/plugins" : `/?view=${view}`}">${icon(symbol)}${label}</a>`,
+        `<a href="${view === "events" ? "/events" : view === "resources" ? "/resources" : view === "gallery" ? "/cards" : view === "plugins" ? "/plugins" : `/?view=${view}`}">${icon(symbol)}${label}</a>`,
     )
     .join("");
   const bottom = [
