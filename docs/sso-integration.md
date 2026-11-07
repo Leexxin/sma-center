@@ -6,14 +6,14 @@
 
 ## 1. 方案与边界
 
-sma-center 是统一导航入口和身份提供方（OP），业务系统是 OIDC 客户端（RP）。用户在中心完成 TOTP 登录，在 `/applications` 选择应用；应用发起授权码流程，中心显示授权确认页，用户确认后应用获得可验证的身份，创建自己的服务端会话。已有中心会话时不重复输入 TOTP，但仍需确认每次授权。
+sma-center 是统一导航入口和身份提供方（OP），业务系统是 OIDC 客户端（RP）。用户在中心完成 TOTP 登录，在 `/resources` 的“业务应用”类型选择应用；应用发起授权码流程，中心显示授权确认页，用户确认后应用获得可验证的身份，创建自己的服务端会话。已有中心会话时不重复输入 TOTP，但仍需确认每次授权。
 
 ```mermaid
 sequenceDiagram
   participant U as 浏览器
   participant C as sma-center
   participant B as 业务系统后端
-  U->>C: TOTP 登录 /applications
+  U->>C: TOTP 登录 /resources
   U->>B: 应用入口 /login
   B->>U: 跳转 authorize，绑定 state/nonce/PKCE
   U->>C: 授权请求（无中心会话先登录）
@@ -34,7 +34,7 @@ sequenceDiagram
 | 协议 | OIDC 授权码模式，强制 S256 PKCE；RS256 ID Token、JWKS、Discovery、UserInfo |
 | 应用授权 | 仅已注册应用能申请此单一主体；每次授权要求确认 |
 | 令牌管理 | 私密客户端 Basic/Post 认证；内省、撤销；中心注销立即使在线验证失效 |
-| 入口 | 侧栏“业务应用”及 `/applications`；入口指向业务系统的登录启动地址 |
+| 入口 | 资源页的“业务应用”类型；旧 `/applications` 跳转至该类型。入口指向业务系统的登录启动地址 |
 | 原有功能 | 资源、SMA 指标、版本中心、TOTP、存储主体和加密凭据保留，无数据库迁移 |
 | 未实现 | 多用户/组织/租户、中心 RBAC、用户同步 SCIM、SAML、LDAP、刷新令牌、机器 client_credentials、动态注册、SPA 直连、第三方身份源、OpenID 官方认证 |
 | 部署 | 单实例；授权事务和令牌存于内存，重启后需重新登录业务应用；不支持多副本负载均衡 |
@@ -45,7 +45,7 @@ sequenceDiagram
 
 ## 2. 中心启用配置
 
-默认不启用 SSO。未配置 issuer 时，现有 TOTP 登录、API 与 Token 不变，“业务应用”显示未启用提示。启用后服务启动时检查客户端文件和签名密钥，错误则拒绝启动，避免带错误认证配置运行。
+默认不启用 SSO。未配置 issuer 时，现有 TOTP 登录、API 与 Token 不变，资源页“业务应用”类型显示未启用提示。启用后服务启动时检查客户端文件和签名密钥，错误则拒绝启动，避免带错误认证配置运行。
 
 | 环境变量 | 默认/要求 |
 | --- | --- |
@@ -148,7 +148,8 @@ token_endpoint_auth_method: client_secret_basic
 | `/oidc/userinfo` | GET 身份信息 | `Authorization: Bearer <access_token>` |
 | `/oidc/introspect` | POST 令牌有效性 | 客户端认证，只查看本客户端令牌 |
 | `/oidc/revoke` | POST 撤销访问令牌 | 客户端认证，只撤销本客户端令牌 |
-| `/applications` | GET 已注册应用目录 | 中心浏览器会话 |
+| `/applications` | GET 兼容跳转资源页业务应用类型 | 中心浏览器会话 |
+| `/api/applications` | GET 业务应用公开入口字段 | 中心浏览器会话 |
 
 授权请求示意（所有值用 URLSearchParams 编码）：
 
@@ -268,3 +269,5 @@ Software Vault client_id = software-vault
 ## 统一界面
 
 应用目录、授权同意、安全设置与登录/绑定页共用总览的设计变量与图标。已登录页面有相同侧栏和总览返回入口，主题、强调色与密度读取现有偏好；登录页保持紧凑表单。公共 `/console.css` 只提供样式，不包含业务数据。原生表单仍不加载脚本，CSP 允许同源样式且保留原表单来源限制；TOTP、PKCE、授权码和退出流程不变。见[统一控制台方案](unified-console.md)。
+
+应用目录接口 `GET /api/applications` 要求中心登录，只返回 `enabled` 和 `applications` 数组中的 `id`、`name`、`url`。不向浏览器发送客户端密钥摘要或回调列表，不改变授权确认流程。

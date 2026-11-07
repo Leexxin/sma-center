@@ -80,6 +80,7 @@ export async function collectSamples() {
               systemDiskPercent: snapshot.metrics.systemDiskPercent,
               sourceTimestamp: snapshot.timestamp,
               agentVersion: snapshot.agentVersion,
+              errors: snapshot.errors,
             };
             await db
               .prepare(

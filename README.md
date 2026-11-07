@@ -44,4 +44,4 @@ SMA Bearer Token 以 AES-256-GCM 加密并仅在服务端使用。TOTP 种子也
 
 ## 统一入口与 SSO
 
-可选启用 OIDC 授权码 + S256 PKCE，为可信业务系统提供单用户统一登录。侧栏“业务应用”进入应用目录，已有 TOTP 和 Agent 凭据保持兼容。中心注册、HTTP IP/HTTPS 来源配置、其他系统开发及 Node BFF 参考见 [SSO 对接手册](docs/sso-integration.md)；给其他系统开发者请转发 [业务系统接入说明](docs/sso-client-integration.md)。默认关闭；当前代码交付不代表生产已启用。
+可选启用 OIDC 授权码 + S256 PKCE，为可信业务系统提供单用户统一登录。资源页“业务应用”类型进入应用目录，已有 TOTP 和 Agent 凭据保持兼容。中心注册、HTTP IP/HTTPS 来源配置、其他系统开发及 Node BFF 参考见 [SSO 对接手册](docs/sso-integration.md)；给其他系统开发者请转发 [业务系统接入说明](docs/sso-client-integration.md)。默认关闭；当前代码交付不代表生产已启用。

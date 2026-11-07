@@ -1821,3 +1821,14 @@ html[data-theme="dark"][data-accent="orange"] {
   color: var(--ws-blue);
   background: var(--ws-soft);
 }
+
+/* Keep focus rings and wrapped controls separated at all viewport sizes. */
+.resources-panel > .ui-toolbar { margin-bottom: 18px; }
+.resources-panel > .ui-tabs { gap: 8px; }
+.ui-tabs button { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.resource-tile .ui-toolbar { flex-wrap: wrap; justify-content: flex-start; margin-top: auto; }
+.card-type-title > div { min-width: 0; }
+.resource-tile h3 { overflow-wrap: anywhere; }
+.collection-status { cursor: help; border: 0 !important; background: transparent !important; padding: 0 !important; text-align: left; font: inherit; }
+.collection-details { max-width: min(360px, calc(100vw - 32px)); overflow-wrap: anywhere; }
+.collection-details p { margin-top: 6px; }

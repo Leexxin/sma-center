@@ -9,23 +9,51 @@ import {
 } from "./resource-manager";
 import type { ConsoleContext } from "@/lib/console-context";
 import type { Resource } from "@/db/resources";
+import CollectionStatus from "./collection-status";
 import { reportedStatus } from "@/lib/resource-status";
+type Application = { id: string; name: string; url: string };
+type Sample = {
+  resourceId: string;
+  quality: string;
+  timestamp: number;
+  payload?: { errors?: { collector: string; code: string }[] };
+};
+
 export default function ResourcesPage({
   context,
   initialResources,
+  initialKind = "all",
 }: {
+  initialKind?: string;
   context: ConsoleContext;
   initialResources: Resource[];
 }) {
   const [resources, setResources] = useState(initialResources),
-    [kind, setKind] = useState("all"),
+    [kind, setKind] = useState(initialKind),
     [category, setCategory] = useState("all"),
     [query, setQuery] = useState(""),
     [editor, setEditor] = useState<Resource | null | undefined>(undefined),
-    [samples, setSamples] = useState<
-      { resourceId: string; quality: string; timestamp: number }[]
-    >([]),
+    [samples, setSamples] = useState<Sample[]>([]),
     [error, setError] = useState("");
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [applicationError, setApplicationError] = useState("");
+  const [ssoEnabled, setSsoEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    consoleRequest<{ enabled: boolean; applications: typeof applications }>("/api/applications")
+      .then((result) => {
+        if (active) {
+          setApplications(result.applications);
+          setSsoEnabled(result.enabled);
+        }
+      })
+      .catch(() => {
+        if (active) setApplicationError("业务应用暂时无法读取，请刷新重试。");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   useEffect(() => {
     let active = true;
     const load = () =>
@@ -62,6 +90,9 @@ export default function ResourcesPage({
           .toLowerCase()
           .includes(query.toLowerCase())),
   );
+  const visibleApplications = (kind === "all" || kind === "application") && category === "all"
+    ? applications.filter((a) => !query.trim() || `${a.name} ${a.url}`.toLowerCase().includes(query.trim().toLowerCase()))
+    : [];
   return (
     <ConsoleShell
       context={{ ...context, resourceCount: resources.length }}
@@ -71,13 +102,13 @@ export default function ResourcesPage({
       <header className="ui-page-heading">
         <div>
           <h1>资源</h1>
-          <p>{resources.length} 项资源 · 按类型与分类管理</p>
+          <p>{resources.length} 项资源 · {applications.length} 项业务应用</p>
         </div>
         <button className="ws-primary" onClick={() => setEditor(null)}>
           添加资源
         </button>
       </header>
-      <section className="ui-panel">
+      <section className="ui-panel resources-panel">
         <div className="ui-toolbar">
           <input
             aria-label="搜索资源"
@@ -89,6 +120,7 @@ export default function ResourcesPage({
         <div className="ui-tabs" role="group" aria-label="资源类型">
           {[
             ["all", "全部"],
+            ["application", "业务应用"],
             ...Object.entries(resourceKinds).map(([k, m]) => [k, m.label]),
           ].map(([k, name]) => (
             <button
@@ -101,7 +133,7 @@ export default function ResourcesPage({
             >
               {name}
               <small>
-                {resources.filter((r) => k === "all" || r.kind === k).length}
+                {k === "application" ? applications.length : resources.filter((r) => k === "all" || r.kind === k).length + (k === "all" ? applications.length : 0)}
               </small>
             </button>
           ))}
@@ -124,6 +156,8 @@ export default function ResourcesPage({
           ))}
         </div>
         {error && <p className="ui-warning">{error}</p>}
+        {(kind === "all" || kind === "application") && applicationError && <p className="ui-warning" role="alert">{applicationError}</p>}
+        {kind === "application" && ssoEnabled === false && <p className="ui-muted">尚未启用统一登录，请按 SSO 接入文档配置。</p>}
         <div className="resources-grid">
           {visible.map((r) => {
             const Icon = resourceKinds[r.kind].icon;
@@ -145,11 +179,11 @@ export default function ResourcesPage({
                   </div>
                 </div>
                 <p>{r.description || r.url}</p>
-                <span
+                <CollectionStatus
                   className={`resource-report ${error ? "warning" : status.tone}`}
-                >
-                  {error ? "上报状态读取失败" : status.label}
-                </span>
+                  label={error ? "上报状态读取失败" : status.label}
+                  errors={samples.find((s) => s.resourceId === r.id)?.payload?.errors}
+                />
                 <div className="ui-toolbar">
                   <button
                     aria-label={`编辑 ${r.name}`}
@@ -170,8 +204,16 @@ export default function ResourcesPage({
               </article>
             );
           })}
+          {visibleApplications.map((a) => (
+            <article key={`application:${a.id}`} className="resource-tile">
+              <div className="card-type-title"><h3>{a.name}</h3></div>
+              <small>业务应用 · 统一登录</small>
+              <p>{a.url}</p>
+              <a href={a.url} rel="noreferrer">打开应用 ↗</a>
+            </article>
+          ))}
         </div>
-        {!visible.length && <p className="ws-empty">没有匹配的资源</p>}
+        {!visible.length && !visibleApplications.length && <p className="ws-empty">没有匹配的资源</p>}
       </section>
       {editor !== undefined && (
         <ResourceEditor

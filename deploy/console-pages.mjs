@@ -48,7 +48,6 @@ export function nativePage(title, subtitle, content, options = {}) {
     .join("");
   const bottom = [
     ["/sma/releases", "版本中心", "download", "releases"],
-    ["/applications", "业务应用", "link", "applications"],
     ["/security", "安全设置", "shield", "security"],
     ["/?view=settings", "设置", "settings", "settings"],
   ]

@@ -63,7 +63,7 @@ export class OidcProvider {
     return data + '.' + sign('RSA-SHA256', Buffer.from(data), this.key).toString('base64url');
   }
   async handle(request, response, url, session, { form, html, redirect, reply, validOrigin, presentation = {} }) {
-    if (!['/.well-known/openid-configuration', '/applications'].includes(url.pathname) && !url.pathname.startsWith('/oidc/')) return false;
+    if (!['/.well-known/openid-configuration', '/applications', '/api/applications'].includes(url.pathname) && !url.pathname.startsWith('/oidc/')) return false;
     this.sweep();
     response.setHeader('Referrer-Policy', 'no-referrer');
     const json = (status, body) => reply(status, JSON.stringify(body), 'application/json; charset=utf-8');
@@ -74,10 +74,15 @@ export class OidcProvider {
       json(200, url.pathname.endsWith('jwks') ? { keys: [this.jwk] } : this.metadata()); return true;
     }
     const clients = this.clients();
+    if (url.pathname === '/api/applications') {
+      if (!isGet) return error(405, 'invalid_request');
+      if (!session) return error(401, 'unauthorized');
+      json(200, { enabled: true, applications: clients.map(c => ({ id: c.client_id, name: c.name, url: c.entry_url })) }); return true;
+    }
     if (url.pathname === '/applications') {
       if (!isGet) return error(405, 'invalid_request');
       if (!session) { redirect('/login'); return true; }
-      html(200, nativePage('业务应用','已注册的统一登录应用。',`<div class="ui-app-grid">${clients.map(c => `<a class="ui-app-link" href="${escape(c.entry_url)}" rel="noreferrer"><span>↗</span>${escape(c.name)}</a>`).join('') || '<p>尚未注册业务应用。</p>'}</div>`,{...presentation,authenticated:true,current:'applications'})); return true;
+      redirect('/resources?kind=application'); return true;
     }
     if (url.pathname === '/oidc/authorize') {
       if (!isGet) return error(405, 'invalid_request');

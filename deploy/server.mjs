@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import { OidcProvider, ssoNext } from './oidc.mjs';
 import { TotpAuth } from './totp-auth.mjs';
 import { REFERRER_POLICY, validWriteOrigin } from './request-origin.mjs';
-import { nativePage } from './console-pages.mjs';
 import { setupPage, enrollPage, loginPage, securityPage } from './auth-pages.mjs';
 const directory = process.env.SMA_CENTER_DATA_DIR || new URL('../.sma-center-data/', import.meta.url).pathname;
 process.env.SMA_CENTER_DATA_DIR ||= directory;
@@ -99,7 +98,11 @@ createServer(async (request, response) => {
       if (request.method !== 'POST') { reply(405, 'Method not allowed'); return; }
       auth.logout(); response.setHeader('Set-Cookie', [cookie(cookieName, '', 0), cookie('sma_center_session', '', 0), cookie('atlas_session', '', 0)]); redirect('/login'); return;
     }
-    if (!oidc && url.pathname === '/applications') { html(503, nativePage('业务应用','尚未启用统一登录。','<p>请按 SSO 接入文档配置。</p>',{...presentation,authenticated:true,current:'applications'})); return; }
+    if (!oidc && url.pathname === '/applications') { redirect('/resources?kind=application'); return; }
+    if (!oidc && url.pathname === '/api/applications') {
+      if (request.method !== 'GET') { reply(405, 'Method not allowed'); return; }
+      reply(200, JSON.stringify({ enabled: false, applications: [] }), 'application/json'); return;
+    }
     if (url.pathname === '/security') {
       if (request.method === 'POST') {
         const values = await form();

@@ -28,6 +28,7 @@ export default async function Home({
   const boards = await listBoards(user.userId, resources);
   return (
     <Workspace
+      key={`${navigation.view || "overview"}:${navigation.board || ""}:${navigation.add || ""}:${navigation.resource || ""}`}
       initialDefinitions={await listCardDefinitions(user.userId)}
       initialAdd={navigation.add}
       initialResource={navigation.resource}
