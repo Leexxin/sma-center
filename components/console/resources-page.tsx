@@ -1,4 +1,5 @@
 "use client";
+import SiteIcon from "@/components/console/site-icon";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ConsoleShell from "./shell";
@@ -169,7 +170,7 @@ export default function ResourcesPage({
               <article key={r.id} className="resource-tile">
                 <div className="card-type-title">
                   <span className="ws-cardicon">
-                    <Icon size={18} />
+                    {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} /> : <Icon size={18} />}
                   </span>
                   <div>
                     <h3>{r.name}</h3>
@@ -181,6 +182,7 @@ export default function ResourcesPage({
                 <p>{r.description || r.url}</p>
                 <CollectionStatus
                   className={`resource-report ${error ? "warning" : status.tone}`}
+                  tone={error ? "warning" : status.tone}
                   label={error ? "上报状态读取失败" : status.label}
                   errors={samples.find((s) => s.resourceId === r.id)?.payload?.errors}
                 />

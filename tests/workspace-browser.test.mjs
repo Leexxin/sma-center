@@ -27,8 +27,12 @@ test(
     await new Promise((resolve) => endpoint.close(resolve));
     const origin = `http://127.0.0.1:${port}`;
     let requests = 0;
+    const favicon = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR5kAAAAASUVORK5CYII=", "base64");
     const agent = createServer((req, res) => {
-      if (req.url === "/version") {
+      if (req.url === "/site/") { res.setHeader("Content-Type", "text/html"); res.end('<link rel="icon" href="/site/assets/logo.png">'); return; }
+      if (req.url === "/site/assets/logo.png") { res.setHeader("Content-Type", "image/png"); res.end(favicon); return; }
+
+      if (req.url.endsWith("/version")) {
         res.end(JSON.stringify({ version: "v0.2.8" }));
         return;
       }
@@ -76,7 +80,7 @@ test(
             },
           ],
           disks: [],
-          errors: [{ collector: "disk", code: "permission_denied" }],
+          errors: req.url.startsWith("/normal/") ? [] : [{ collector: "disk", code: "permission_denied" }],
         }),
       );
     });
@@ -436,6 +440,27 @@ test(
         agentToken: "isolated-qa-agent-token",
       });
       assert.equal(resource.status, 201);
+      assert.equal((await api("/api/site-icon", "POST", { url: "file:///etc/passwd" })).status, 400);
+      const site = await api("/api/resources", "POST", {
+        kind: "site", name: "QA Icon Site", url: `http://127.0.0.1:${agent.address().port}/site/`,
+      });
+      assert.equal(site.status, 201);
+      assert.equal(site.body.siteIcon, `data:image/png;base64,${favicon.toString("base64")}`);
+      const normal = await api("/api/resources", "POST", {
+        kind: "server", name: "QA Healthy Node", url: "https://healthy.example.invalid",
+        agentUrl: `http://127.0.0.1:${agent.address().port}/normal`, agentToken: "isolated-qa-agent-token",
+      });
+      assert.equal(normal.status, 201);
+      await call("Page.navigate", { url: origin + "/resources" });
+      await until("[...document.querySelectorAll('.resource-tile')].some(e=>e.textContent.includes('QA Icon Site') && e.querySelector('img.site-favicon')?.naturalWidth===1)");
+      assert.equal(await evaluate("[...document.querySelectorAll('.resource-tile')].find(e=>e.textContent.includes('QA Icon Site')).querySelector('img.site-favicon').naturalWidth"), 1);
+      await evaluate("document.querySelector('[aria-label=\"编辑 QA Icon Site\"]').click()");
+      await until("document.querySelector('.site-icon-setting img.site-favicon')?.naturalWidth===1");
+      assert.equal(await evaluate("document.querySelector('.site-icon-setting img.site-favicon').naturalWidth"), 1);
+      await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='重新采集').click()");
+      await until("document.querySelector('.site-icon-setting').textContent.includes('已采集站点图标')");
+      await evaluate("document.querySelector('.ws-config').requestSubmit()");
+      await until("!document.querySelector('.site-icon-setting')");
       // Editing metadata must preserve an existing write-only credential.
       await call("Page.navigate", { url: origin + "/?view=resources" });
       await until(
@@ -683,6 +708,7 @@ test(
       assert.equal(backup.body.cardStates.length, 2);
 
       assert.equal(backup.status, 200);
+      assert.equal(backup.body.resources.find(r => r.id === site.body.id).siteIcon, site.body.siteIcon);
       assert(backup.body.dashboards.some((b) => b.name === "测试面板"));
       assert(!JSON.stringify(backup.body).includes("ciphertext"));
       const restored = await api("/api/backup", "POST", {
@@ -690,6 +716,12 @@ test(
         mode: "merge",
       });
       assert.equal(restored.status, 200);
+      assert.equal(restored.body.resources.find(r => r.id === site.body.id).siteIcon, site.body.siteIcon);
+      const legacyBackup = structuredClone(backup.body);
+      legacyBackup.resources.forEach(r => { delete r.siteIcon; });
+      const legacyRestore = await api("/api/backup", "POST", { backup: legacyBackup, mode: "merge" });
+      assert.equal(legacyRestore.status, 200);
+      assert.equal(legacyRestore.body.resources.find(r => r.id === site.body.id).siteIcon, site.body.siteIcon);
       assert.equal((await api(memoPath)).body.state.text, "Persistent memo");
       assert((await api(memoPath)).body.revision > 1);
       const cleanupWidget = {
@@ -832,10 +864,10 @@ test(
       await call("Page.navigate", { url: origin + "/security" });
       await until("location.pathname==='/security'");
       const requestsWithoutUI = requests;
-      for (let i = 0; i < 1600 && requests < requestsWithoutUI + 2; i++)
+      for (let i = 0; i < 1600 && requests < requestsWithoutUI + 4; i++)
         await delay(100);
       assert(
-        requests >= requestsWithoutUI + 2,
+        requests >= requestsWithoutUI + 4,
         "background sampler keeps running with no dashboard open; initial=" +
           requestsWithoutUI +
           "; requests=" +
@@ -856,14 +888,17 @@ test(
       assert.equal(sample.quality, "partial");
       assert.deepEqual(sample.payload.errors, [{ collector: "disk", code: "permission_denied" }]);
       await call("Page.navigate", { url: origin + "/resources" });
-      await until("!!document.querySelector('.resource-tile .collection-status')");
+      await until("!!document.querySelector('.resource-tile .status-warning') && !!document.querySelector('.resource-tile .status-good')");
+      assert.equal(await evaluate("document.querySelector('.resource-tile .status-warning').textContent.trim()"), "");
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.resource-tile .status-warning .status-dot')).backgroundColor"), "rgb(230, 175, 56)");
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.resource-tile .status-good .status-dot')).backgroundColor"), "rgb(60, 173, 128)");
       await call("Page.bringToFront");
-      await evaluate("document.querySelector('.resource-tile .collection-status').focus()");
+      await evaluate("document.querySelector('.resource-tile .status-warning').focus()");
       await until("!!document.querySelector('[role=tooltip]') && document.querySelector('[role=tooltip]').textContent.includes('disk · permission_denied')");
       await capture("collector-details");
-      await evaluate("document.querySelector('.resource-tile .collection-status').blur()");
+      await evaluate("document.querySelector('.resource-tile .status-warning').blur()");
       await until("!document.querySelector('[role=tooltip]')");
-      const trigger = await evaluate("(()=>{const r=document.querySelector('.resource-tile .collection-status').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+      const trigger = await evaluate("(()=>{const r=document.querySelector('.resource-tile .status-warning').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
       await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...trigger });
       await until("!!document.querySelector('[role=tooltip]') && document.querySelector('[role=tooltip]').textContent.includes('permission_denied')");
       const history = await api(

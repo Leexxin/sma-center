@@ -30,6 +30,7 @@ export const resources = sqliteTable(
     }).notNull(),
     name: text("name").notNull(),
     url: text("url").notNull(),
+    siteIcon: text("site_icon").notNull().default(""),
     description: text("description").notNull().default(""),
     category: text("category").notNull().default("其他"),
     status: text("status", {

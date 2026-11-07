@@ -1,3 +1,4 @@
+import { normalizeSiteIcon } from "../lib/site-icon-data.ts";
 import {
   exportCards,
   parseCardBackup,
@@ -45,6 +46,7 @@ type BackupResource = {
   memoryUsage: number;
   diskUsage: number;
   agentUrl: string;
+  siteIcon?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -92,7 +94,7 @@ export async function createFullBackup(): Promise<SmaCenterBackup> {
         .prepare(
           `SELECT id, user_id AS userId, kind, name, url, description, category, status, note,
       pinned, cpu_usage AS cpuUsage, temperature, memory_usage AS memoryUsage, disk_usage AS diskUsage,
-      agent_url AS agentUrl, created_at AS createdAt, updated_at AS updatedAt FROM resources
+      agent_url AS agentUrl, site_icon AS siteIcon, created_at AS createdAt, updated_at AS updatedAt FROM resources
       ORDER BY user_id, created_at`,
         )
         .all<Omit<BackupResource, "pinned"> & { pinned: number }>(),
@@ -270,11 +272,11 @@ export async function restoreFullBackup(
         .prepare(
           `INSERT INTO resources
       (id, user_id, kind, name, url, description, category, status, note, pinned, cpu_usage, temperature,
-       memory_usage, disk_usage, agent_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       memory_usage, disk_usage, agent_url, created_at, updated_at, site_icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, kind = excluded.kind, name = excluded.name,
       url = excluded.url, description = excluded.description, category = excluded.category, status = excluded.status,
       note = excluded.note, pinned = excluded.pinned, cpu_usage = excluded.cpu_usage, temperature = excluded.temperature,
-      memory_usage = excluded.memory_usage, disk_usage = excluded.disk_usage, agent_url = excluded.agent_url,
+      memory_usage = excluded.memory_usage, disk_usage = excluded.disk_usage, agent_url = excluded.agent_url, site_icon = COALESCE(?, resources.site_icon),
       created_at = excluded.created_at, updated_at = excluded.updated_at`,
         )
         .bind(
@@ -295,6 +297,8 @@ export async function restoreFullBackup(
           item.agentUrl,
           item.createdAt,
           item.updatedAt,
+          item.siteIcon || "",
+          item.siteIcon ?? null,
         ),
     ),
     ...(backup.dashboards || []).map((b) =>
@@ -399,6 +403,8 @@ function parseResource(value: unknown): BackupResource {
   } catch {
     throw new Error("INVALID_BACKUP");
   }
+  let siteIcon: string | undefined;
+  try { siteIcon = item.siteIcon === undefined ? undefined : normalizeSiteIcon(item.siteIcon); } catch { throw new Error("INVALID_BACKUP"); }
   return {
     id: requiredString(item.id, 160),
     userId: requiredString(item.userId, 160),
@@ -421,6 +427,7 @@ function parseResource(value: unknown): BackupResource {
     memoryUsage: finiteNumber(item.memoryUsage),
     diskUsage: finiteNumber(item.diskUsage),
     agentUrl: String(item.agentUrl ?? "").slice(0, 240),
+    siteIcon,
     createdAt: finiteNumber(item.createdAt),
     updatedAt: finiteNumber(item.updatedAt),
   };
