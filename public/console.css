@@ -1852,3 +1852,9 @@ html[data-theme="dark"][data-accent="orange"] {
 .site-icon-setting > div { flex: 1; min-width: 0; }
 .site-icon-setting p { margin: 4px 0 0; color: var(--ws-muted); font-size: 12px; }
 .site-icon-setting button { flex-shrink: 0; }
+
+.database-summary { width: 100%; margin: 0; display: grid; gap: 5px; font-size: 12px; }
+.database-summary > div { display: flex; gap: 12px; justify-content: space-between; }
+.database-summary dt { color: var(--ws-muted); flex-shrink: 0; }
+.database-summary dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
+.events-page .ws-event > div { flex: 1; min-width: 0; }

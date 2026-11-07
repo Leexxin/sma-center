@@ -188,7 +188,7 @@ SMA_CREDENTIAL_KEY 由网关从 secrets.json 注入，不能随意设置一个�
 
 数据卷包含：
 
-- `sma-center.sqlite`：资源及已采集站点图标、偏好设置、加密 SMA 凭据等；WAL 模式还可能有 `-wal`、`-shm` 文件。
+- `sma-center.sqlite`：资源及已采集站点图标、偏好设置、加密 Agent/数据库凭据等；WAL 模式还可能有 `-wal`、`-shm` 文件。
 - `secrets.json`：会话签名和凭据加密所需密钥，必须和数据一起备份。
 - `totp-auth.json`：加密 TOTP 种子、会话代次、登录时长及认证状态。
 - `setup-code.txt`：仅未绑定或重置后存在的一次性绑定授权码。
@@ -425,3 +425,5 @@ SMA_CENTER_BROWSER_TEST=1 npm test
 2026-11-04 已在 `http://192.168.33.124:8080` 启用 SSO issuer。现场 `/opt/sma-center/compose.override.yaml` 自动加载 SSO 环境配置，Secure Cookie 为 false，仍使用原外部卷 `sma-center-data`。普通 `docker compose` 命令会自动合并该文件；不要在后续更新中遗漏它或无意改用仅含基础文件的显式 `-f` 命令。完整配置与客户端管理见 [SSO 接入手册](sso-integration.md)，本次镜像、备份和实际验证结果见 [部署记录](deployment-status.md)。中心上线不代表 Software Vault 等业务系统已注册或完成回调联调。
 
 站点图标与状态圆点的操作、采集网络与大小边界、`0009_legal_mystique.sql` 迁移及备份兼容性见[面板与卡片](workspace.md#状态圆点与站点图标)。图标由中心访问所填站点采集，不需要额外外部图标服务或 Agent 配置。
+
+服务器 IP 输入、独立事件页及数据库连接/密码的录入、导入与备份边界见[面板说明](workspace.md#服务器地址独立事件与数据库连接)。`0010_spicy_obadiah_stane.sql` 为新增表/列迁移；数据库密码不包含在页面 JSON 中，覆盖还原后需重新配置，整卷与密钥须一并保留。数据库资源录入不会改变远端账号或数据库服务。

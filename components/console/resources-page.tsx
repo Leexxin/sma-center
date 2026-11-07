@@ -1,4 +1,5 @@
 "use client";
+import { resourceOpenUrl } from "@/lib/resource-address";
 import SiteIcon from "@/components/console/site-icon";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -170,7 +171,7 @@ export default function ResourcesPage({
               <article key={r.id} className="resource-tile">
                 <div className="card-type-title">
                   <span className="ws-cardicon">
-                    {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} /> : <Icon size={18} />}
+                    {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} iconSource={r.siteIconSource} /> : <Icon size={18} />}
                   </span>
                   <div>
                     <h3>{r.name}</h3>
@@ -180,12 +181,13 @@ export default function ResourcesPage({
                   </div>
                 </div>
                 <p>{r.description || r.url}</p>
-                <CollectionStatus
+                {r.kind === "database" && r.database && <dl className="database-summary"><div><dt>连接</dt><dd>{r.database.host}:{r.database.port}</dd></div><div><dt>用户</dt><dd>{r.database.username || "—"}</dd></div><div><dt>默认库 / DB</dt><dd>{r.database.database || "—"}</dd></div><div><dt>用途</dt><dd>{r.database.purpose || "—"}</dd></div><div><dt>密码</dt><dd>{r.credentialConfigured?"已配置":"未配置"}</dd></div></dl>}
+                {r.kind !== "site" && <CollectionStatus
                   className={`resource-report ${error ? "warning" : status.tone}`}
                   tone={error ? "warning" : status.tone}
                   label={error ? "上报状态读取失败" : status.label}
                   errors={samples.find((s) => s.resourceId === r.id)?.payload?.errors}
-                />
+                />}
                 <div className="ui-toolbar">
                   <button
                     aria-label={`编辑 ${r.name}`}
@@ -199,9 +201,7 @@ export default function ResourcesPage({
                   {r.kind === "server" && r.agentUrl && (
                     <Link href={`/servers/${r.id}`}>主机详情</Link>
                   )}
-                  <a href={r.url} target="_blank" rel="noreferrer">
-                    打开 ↗
-                  </a>
+                  {resourceOpenUrl(r) && <a href={resourceOpenUrl(r)} target="_blank" rel="noreferrer">打开 ↗</a>}
                 </div>
               </article>
             );

@@ -46,13 +46,15 @@ export function credentialMutationStatement(
   userId: string,
   resourceId: string,
   mutation: CredentialMutation,
+  kind: "agent" | "database" = "agent",
 ) {
   if (mutation.type === "preserve") return null;
   const db = getRawDb();
+  const table = kind === "database" ? "database_credentials" : "agent_credentials";
   if (mutation.type === "clear") {
-    return db.prepare("DELETE FROM agent_credentials WHERE resource_id = ? AND user_id = ?").bind(resourceId, userId);
+    return db.prepare(`DELETE FROM ${table} WHERE resource_id = ? AND user_id = ?`).bind(resourceId, userId);
   }
-  return db.prepare(`INSERT INTO agent_credentials (resource_id, user_id, ciphertext, iv, key_version, updated_at)
+  return db.prepare(`INSERT INTO ${table} (resource_id, user_id, ciphertext, iv, key_version, updated_at)
     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(resource_id) DO UPDATE SET user_id = excluded.user_id,
     ciphertext = excluded.ciphertext, iv = excluded.iv, key_version = excluded.key_version, updated_at = excluded.updated_at`)
     .bind(resourceId, userId, mutation.ciphertext, mutation.iv, mutation.keyVersion, Date.now());

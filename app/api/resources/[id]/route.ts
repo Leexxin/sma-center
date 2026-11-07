@@ -16,7 +16,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const existing = await getResource(user.userId, id);
       if (!existing) return Response.json({ error: "记录不存在。" }, { status: 404 });
       input.resource.siteIcon = existing.url === input.resource.url && existing.siteIcon
-        ? existing.siteIcon : await collectSiteIcon(input.resource.url).catch(() => "");
+        ? existing.siteIcon : await collectSiteIcon(input.resource.url, fetch, input.resource.siteIconSource).catch(() => "");
     }
     const resource = await updateResource(user.userId, id, input.resource, input.credential);
     if (!resource) return Response.json({ error: "记录不存在。" }, { status: 404 });
@@ -24,7 +24,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
     if (error instanceof SmaCredentialConfigurationError) return Response.json({ error: error.message, code: error.code }, { status: 503 });
-    if (["INVALID_INPUT", "INVALID_URL", "INVALID_AGENT_URL", "INVALID_CREDENTIAL", "INVALID_SITE_ICON"].includes(code)) return Response.json({ error: "请检查名称、网址和 SMA 凭据配置。" }, { status: 400 });
+    if (["INVALID_INPUT", "INVALID_URL", "INVALID_AGENT_URL", "INVALID_CREDENTIAL", "INVALID_SITE_ICON", "INVALID_DATABASE_CONNECTION"].includes(code)) return Response.json({ error: "请检查名称、地址、数据库连接和凭据配置。" }, { status: 400 });
     console.error("Failed to update resource", error instanceof Error ? error.name : "unknown");
     return Response.json({ error: "更新失败，请稍后重试。" }, { status: 503 });
   }

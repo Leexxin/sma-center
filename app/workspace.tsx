@@ -1,4 +1,5 @@
 "use client";
+import { resourceOpenUrl } from "@/lib/resource-address";
 import SiteIcon from "@/components/console/site-icon";
 import CollectionStatus from "@/components/console/collection-status";
 
@@ -648,7 +649,7 @@ export default function Workspace({
           {eventsList(activeEvents, true)}
           <button
             className="ws-text-link ws-bottom"
-            onClick={() => setEventOpen(true)}
+            onClick={() => window.location.assign("/events")}
           >
             全部事件 <ArrowUpRight size={13} />
           </button>
@@ -661,9 +662,9 @@ export default function Workspace({
           {pinned.map((r) => {
             const Icon = resourceMeta[r.kind].icon;
             return (
-              <a href={r.url} key={r.id} target="_blank" rel="noreferrer">
+              <a href={resourceOpenUrl(r)} key={r.id} target="_blank" rel="noreferrer">
                 <span>
-                  {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} size={19} /> : <Icon size={19} />}
+                  {r.kind === "site" ? <SiteIcon icon={r.siteIcon} url={r.url} iconSource={r.siteIconSource} size={19} /> : <Icon size={19} />}
                 </span>
                 {r.name}
                 <ArrowUpRight size={11} />
@@ -696,12 +697,12 @@ export default function Workspace({
       const sample = samples.get(r.id);
       return (
         <>
-          <CollectionStatus
+          {r.kind !== "site" && <CollectionStatus
             className={`ws-state ${state.className}`}
             tone={state.className}
             label={state.label}
             errors={sample?.payload.errors}
-          />
+          />}
           {r.kind === "server" ? (
             <>
               <div className="ws-metrics">
@@ -727,9 +728,7 @@ export default function Workspace({
               </p>
               <div className="ws-cardfoot">
                 <span>{resourceMeta[r.kind].name}</span>
-                <a href={r.url} target="_blank" rel="noreferrer">
-                  打开 <ArrowUpRight size={12} />
-                </a>
+                {resourceOpenUrl(r) && <a href={resourceOpenUrl(r)} target="_blank" rel="noreferrer">打开 <ArrowUpRight size={12} /></a>}
               </div>
             </>
           )}
@@ -747,7 +746,7 @@ export default function Workspace({
           className={`ws-value-state ${v != null && v >= w.threshold ? "warning" : ""}`}
         >
           {v == null
-            ? <CollectionStatus tone={status(r).className} label={status(r).label} errors={samples.get(r.id)?.payload.errors} />
+            ? r.kind === "site" ? null : <CollectionStatus tone={status(r).className} label={status(r).label} errors={samples.get(r.id)?.payload.errors} />
             : v >= w.threshold
               ? `超过 ${w.threshold}% 阈值`
               : `阈值 ${w.threshold}%`}
@@ -780,7 +779,7 @@ export default function Workspace({
   );
   function openView(view: ConsoleView) {
     if (view === "resources") window.location.assign("/resources");
-    if (view === "events") setEventOpen(true);
+    if (view === "events") window.location.assign("/events");
     if (view === "sources") setConnections(true);
     if (view === "gallery") {
       setQuery("");
@@ -1066,7 +1065,7 @@ export default function Workspace({
                         }
                       />
                     ) : (
-                      r?.kind === "site" && w.type === "resource" ? <SiteIcon icon={r.siteIcon} url={r.url} /> : <Icon size={18} />
+                      r?.kind === "site" && w.type === "resource" ? <SiteIcon icon={r.siteIcon} url={r.url} iconSource={r.siteIconSource} /> : <Icon size={18} />
                     )}
                   </span>
                   <div>
@@ -1431,12 +1430,12 @@ export default function Workspace({
           </DialogHeader>
           {detail && (
             <>
-              <CollectionStatus
+              {detail.kind !== "site" && <CollectionStatus
                 className={`ws-state ${status(detail).className}`}
                 tone={status(detail).className}
                 label={status(detail).label}
                 errors={samples.get(detail.id)?.payload.errors}
-              />
+              />}
               <p>{detail.description}</p>
               {detail.kind === "server" && (
                 <>
@@ -1480,9 +1479,7 @@ export default function Workspace({
                 </div>
               </dl>
               <div className="ws-actions">
-                <a href={detail.url} target="_blank" rel="noreferrer">
-                  打开 <ArrowUpRight size={14} />
-                </a>
+                {resourceOpenUrl(detail) && <a href={resourceOpenUrl(detail)} target="_blank" rel="noreferrer">打开 <ArrowUpRight size={14} /></a>}
                 {detail.kind === "server" && detail.agentUrl && (
                   <a href={`/servers/${detail.id}`}>
                     服务发现 <ArrowUpRight size={14} />

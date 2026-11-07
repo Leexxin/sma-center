@@ -23,14 +23,14 @@ export async function POST(request: Request) {
   try {
     const input = parseResourceInput(await request.json());
     if (input.resource.kind === "site" && !input.resource.siteIcon) {
-      input.resource.siteIcon = await collectSiteIcon(input.resource.url).catch(() => "");
+      input.resource.siteIcon = await collectSiteIcon(input.resource.url, fetch, input.resource.siteIconSource).catch(() => "");
     }
     return Response.json(await createResource(user.userId, input.resource, input.credential), { status: 201 });
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
     if (error instanceof SmaCredentialConfigurationError) return Response.json({ error: error.message, code: error.code }, { status: 503 });
-    if (["INVALID_INPUT", "INVALID_URL", "INVALID_AGENT_URL", "INVALID_CREDENTIAL", "INVALID_SITE_ICON"].includes(code)) {
-      const message = code === "INVALID_URL" ? "请输入完整有效的网址。" : code === "INVALID_AGENT_URL" ? "请输入有效的 SMA Agent 地址。" : code === "INVALID_CREDENTIAL" ? "SMA 凭据参数无效。" : "请填写名称和网址。";
+    if (["INVALID_INPUT", "INVALID_URL", "INVALID_AGENT_URL", "INVALID_CREDENTIAL", "INVALID_SITE_ICON", "INVALID_DATABASE_CONNECTION"].includes(code)) {
+      const message = code === "INVALID_URL" ? "请输入有效的地址：服务器可填 IP，站点需填完整网址。" : code === "INVALID_AGENT_URL" ? "请输入有效的 SMA Agent 地址。" : code === "INVALID_CREDENTIAL" ? "SMA 凭据参数无效。" : "请填写名称和网址。";
       return Response.json({ error: message }, { status: 400 });
     }
     console.error("Failed to create resource", error instanceof Error ? error.name : "unknown");

@@ -10,9 +10,9 @@ const { env: { DB } } = await import('../deploy/sqlite-env.mjs');
 
 test('all schema migrations are applied exactly once', async () => {
   const rows = await DB.prepare('SELECT name FROM sma_center_migrations').all();
-  assert.equal(rows.results.length, 10);
+  assert.equal(rows.results.length, 11);
   const tables = await DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-  for (const name of ['resources', 'users', 'user_preferences', 'agent_credentials', 'card_definitions', 'card_states']) assert.ok(tables.results.some(r => r.name === name));
+  for (const name of ['resources', 'users', 'user_preferences', 'agent_credentials', 'card_definitions', 'card_states', 'database_credentials']) assert.ok(tables.results.some(r => r.name === name));
 });
 test('a failing batch rolls back all writes', async () => {
   await DB.exec('CREATE TABLE test_atomic (id TEXT PRIMARY KEY)');
@@ -42,7 +42,7 @@ test('legacy database migration keeps user data and does not replay migrations',
   try {
     const migrated = (await import('../deploy/sqlite-env.mjs?legacy-migration')).env.DB;
     assert.equal(await migrated.prepare('SELECT display_name FROM users WHERE user_id=?').bind('existing-user').first('display_name'), 'Existing user');
-    assert.equal((await migrated.prepare('SELECT * FROM sma_center_migrations').all()).results.length, 10);
+    assert.equal((await migrated.prepare('SELECT * FROM sma_center_migrations').all()).results.length, 11);
     assert.ok(existsSync(join(directory, 'sma-center.sqlite')));
     assert.ok(!existsSync(join(directory, 'atlas.sqlite')));
   } finally { process.env.SMA_CENTER_DATA_DIR = previous; }
@@ -67,6 +67,10 @@ test('site icon upgrade preserves existing resource and credential rows', async 
     const {env:{DB:upgraded}} = await import('../deploy/sqlite-env.mjs?site-icon-upgrade');
     const row = await upgraded.prepare('SELECT * FROM resources').first();
     assert.equal(row.site_icon,'');
+    assert.equal(row.site_icon_source, "");
+    assert.equal(row.database_config, "{}");
+    delete row.site_icon_source;
+    delete row.database_config;
     delete row.site_icon;
     assert.deepEqual(row,{...beforeResource});
     assert.deepEqual(await upgraded.prepare('SELECT * FROM agent_credentials').first(),{...beforeCredential});

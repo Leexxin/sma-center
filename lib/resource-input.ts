@@ -1,3 +1,5 @@
+import { validResourceAddress } from "./resource-address.ts";
+import { parseDatabaseConnection, databaseAddress } from "./database-connection.ts";
 import { normalizeSiteIcon } from "./site-icon-data.ts";
 import type {
   CredentialWrite,
@@ -15,7 +17,8 @@ export function parseResourceInput(value: unknown): ParsedResourceInput {
   const kind = String(body?.kind ?? "tool") as ResourceKind;
   const status = "unknown" as const;
   const name = String(body?.name ?? "").trim();
-  const url = String(body?.url ?? "").trim();
+  const database = kind === "database" ? parseDatabaseConnection(body?.database) : undefined;
+  const url = database ? databaseAddress(database) : String(body?.url ?? "").trim();
   if (
     !name ||
     !url ||
@@ -24,11 +27,7 @@ export function parseResourceInput(value: unknown): ParsedResourceInput {
   ) {
     throw new Error("INVALID_INPUT");
   }
-  try {
-    new URL(url);
-  } catch {
-    throw new Error("INVALID_URL");
-  }
+  if (!validResourceAddress(url, kind)) throw new Error("INVALID_URL");
   const agentUrl = String(body.agentUrl ?? "")
     .trim()
     .replace(/\/$/, "")
@@ -53,11 +52,18 @@ export function parseResourceInput(value: unknown): ParsedResourceInput {
   if (kind !== "server" && (agentToken || clearAgentToken))
     throw new Error("INVALID_CREDENTIAL");
 
+  const databasePassword = typeof body.databasePassword === "string" ? body.databasePassword : undefined;
+  const clearDatabasePassword = body.clearDatabasePassword === true;
+  if ((databasePassword && databasePassword.length > 4096) || (databasePassword && clearDatabasePassword) || (kind !== "database" && (databasePassword || clearDatabasePassword))) throw new Error("INVALID_CREDENTIAL");
+  const siteIconSource = body.siteIconSource === undefined ? undefined : String(body.siteIconSource).trim();
+  if (siteIconSource && !validResourceAddress(siteIconSource,"site")) throw new Error("INVALID_SITE_ICON");
   return {
     resource: {
       name: name.slice(0, 80),
       url,
       kind,
+      ...(database ? { database } : {}),
+      ...(siteIconSource !== undefined ? {siteIconSource} : {}),
       ...(body.siteIcon !== undefined ? { siteIcon: normalizeSiteIcon(body.siteIcon) } : {}),
       status,
       description: String(body.description ?? "")
@@ -77,6 +83,6 @@ export function parseResourceInput(value: unknown): ParsedResourceInput {
       diskUsage: Math.min(100, Math.max(0, Number(body.diskUsage) || 0)),
       agentUrl,
     },
-    credential: { token: agentToken || undefined, clear: clearAgentToken },
+    credential: { token: agentToken || undefined, clear: clearAgentToken, databasePassword: databasePassword || undefined, clearDatabasePassword },
   };
 }

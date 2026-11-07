@@ -31,6 +31,8 @@ export const resources = sqliteTable(
     name: text("name").notNull(),
     url: text("url").notNull(),
     siteIcon: text("site_icon").notNull().default(""),
+    siteIconSource: text("site_icon_source").notNull().default(""),
+    databaseConfig: text("database_config").notNull().default("{}"),
     description: text("description").notNull().default(""),
     category: text("category").notNull().default("其他"),
     status: text("status", {
@@ -68,6 +70,15 @@ export const agentCredentials = sqliteTable(
   },
   (table) => [index("idx_agent_credentials_user").on(table.userId)],
 );
+
+export const databaseCredentials = sqliteTable("database_credentials", {
+  resourceId: text("resource_id").primaryKey().references(() => resources.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
+  ciphertext: text("ciphertext").notNull(),
+  iv: text("iv").notNull(),
+  keyVersion: integer("key_version").notNull().default(1),
+  updatedAt: integer("updated_at").notNull(),
+}, table => [index("idx_database_credentials_user").on(table.userId)]);
 
 export const userPreferences = sqliteTable("user_preferences", {
   userId: text("user_id").primaryKey(),

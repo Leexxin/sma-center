@@ -60,3 +60,18 @@ test("simple SVG favicon is supported but active or externally referencing SVG f
     assert.equal(result.startsWith('data:image/svg+xml;base64,'),valid);
   }
 });
+test('SSO redirects never substitute the identity provider favicon for the business icon', async()=>{
+ const urls:string[]=[];
+ const fake:typeof fetch=async input=>{
+  const url=String(input);urls.push(url);
+  return url==='https://business.test/'?new Response(null,{status:302,headers:{Location:'https://sso.test/login'}}):new Response(null,{status:302,headers:{Location:'https://sso.test/favicon.png'}});
+ };
+ assert.equal(await collectSiteIcon('https://business.test/',fake),'');
+ assert(urls.every(url=>new URL(url).hostname==='business.test'));
+});
+test('an explicit business icon source is fetched directly without loading an SSO page',async()=>{
+ const urls:string[]=[];
+ const fake:typeof fetch=async input=>{urls.push(String(input));return new Response(png);};
+ assert.equal(await collectSiteIcon('https://business.test/',fake,'https://assets.test/business.png'),data);
+ assert.deepEqual(urls,['https://assets.test/business.png']);
+});
