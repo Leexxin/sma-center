@@ -2,7 +2,22 @@
 
 最近核对日期：2026-11-07（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
 
-## 2026-11-07 资源与导航修复上线（当前部署）
+## 2026-11-07 状态圆点与站点图标上线（当前部署）
+
+- [PR #16](https://github.com/Leexxin/sma-center/pull/16) 已合并，生产业务提交 `8f4d525460475bf6cbc8bb5021413901f76a5dbe`。运行镜像 `sha256:0cd916d593ddc1819db334ad016103b559039643bd9c7da67d6dcc6bd5b6bde7`，另标记 `sma-center:8f4d52546047`；北京时间约 14:17 完成容器切换，running/healthy，入口仍为 `http://192.168.33.124:8080`。
+- 采集状态改为正常绿点、异常黄点、未知灰点，悬浮或键盘聚焦显示状态和错误详情；站点支持实际 favicon 采集、预览、重新采集及保存，旧资源可只读获取临时图标。采集失败使用默认图标，不阻止资源保存，边界见[面板说明](workspace.md#状态圆点与站点图标)。
+- 归档 SHA-256 `de6db91dde699503d4dad2dfb90b7ebb1f369fd60fb4a5d5c10cedcd9d9f876f`。230 个 Git 跟踪文件在服务器与运行容器内逐项 SHA-256 一致。本部署记录为随后独立文档提交，不重新构建业务镜像，容器内文档保留构建快照。
+- 升级前整卷备份 `/root/sma-center-backups/sma-center-20261107-061522.tar.gz`，SHA-256 `a8d1768c1be13b585494d6e839cb24790a38cbd3fd02c7d010d7232e12c70b0e`；源码快照 `/root/sma-center-backups/source-20261107T061521Z.tar.gz`，SHA-256 `b2bd19a22da617c686585881c4eb52eecae3d74867be6eb5cae9ca2fd95c01c5`。两份归档已检查可读，文件名使用服务器 UTC。旧镜像保留为 `sma-center:rollback-20261107T061521Z`，未演练恢复或回滚。
+- 沿用原外部卷 `sma-center-data`、端口、网络与自动合并的 `compose.override.yaml`，有效 Compose 配置和 override 字节摘要保持一致。未轮换 Token、重置 TOTP、修改 SSO 注册或重启 Agent。
+- 迁移 `0009_legal_mystique.sql` 已执行，迁移记录共 10 条；resources 新增 site_icon 列，NOT NULL、默认空字符串。比较时仅从资源行投影中排除新增列，原有全部字段摘要与切换前即时基线一致；另验证列结构与迁移记录，未将结构变化掩盖为整表完全相同。
+- resources 12、users 1、user_preferences 1、agent_credentials 8、dashboards 1、card_definitions 0、card_states 1。七张表的原字段行摘要一致；主密钥、TOTP、SSO 客户端及签名私钥文件字节摘要一致，8 条 Agent 凭据均能解密。没有输出真实凭据或卡片内容。
+- 生产只读 HTTP 验收：healthz/CSS/登录/图标为 200，CSS 含黄绿圆点及 favicon 样式；图标采集、应用目录、资源、面板、观测及卡片 API 未认证/伪造内部身份头均为 401，受保护页面跳转登录，外部 Origin 写入为 403。固定 SSO issuer、S256 与单个仅公开公钥的 JWKS 保持不变。
+- 在运行容器中使用已部署采集函数只读检查 4 个站点：2 个获取到 PNG（各 2702 字节），另外 2 个回退默认图标。Halo 后台和个人主页的初始页面响应为 200，但未解析出可用图标声明，`/favicon.ico` 返回 404；没有据此断言浏览器执行脚本后也不存在图标。检查未把采集结果写入资源或修改站点配置。
+- 后续采样确认 8 台 Agent 均有 90 秒内新样本和有效 CPU；3 台 valid、5 台 partial，异常仍为原有 `filesystem:collection_failed`，新样本保留错误详情。本次没有修复或掩盖上游文件系统采集问题。
+- 合并前完整隔离测试 92/92、零跳过，涵盖实际图片解码、编辑预览/重新采集、保存与备份还原、旧库迁移及状态点颜色和悬浮/聚焦详情；ESLint、TypeScript、本地及服务器生产构建通过。仓库没有 GitHub Actions 工作流，未将本地验证描述为远端 CI。
+- 本次生产浏览器实机验收未完成：电脑使用工具因当前浏览器 URL 的访问限制停止，未继续操作或绕过限制。没有读取/导出浏览器会话、输入动态码、添加测试资源、保存测试设置、执行恢复/故障注入或替用户确认外部业务授权。界面交互验证以隔离浏览器回归为依据；生产已核对服务器、数据、迁移与只读 HTTP 行为。
+
+## 2026-11-07 资源与导航修复上线（历史部署）
 
 - [PR #14](https://github.com/Leexxin/sma-center/pull/14) 已合并。生产业务提交 `2cc8f030abc719a72cf27dfe58dd5168c98d19bb`，运行镜像 `sha256:b3a14809f09b0af6e632fc52fdcad5077d31d3b8cbe83bae72ee0410746a3dee`，另标记 `sma-center:2cc8f030abc7`。北京时间约 10:40 完成容器切换，running/healthy，入口仍为 `http://192.168.33.124:8080`。
 - 业务应用并入资源页，移除独立导航，旧 `/applications` 转至资源页应用类型；修正筛选布局、事件查询参数切换，并为异常状态提供采集器/错误码详情。没有数据库迁移、认证重置或 Agent 变更。
