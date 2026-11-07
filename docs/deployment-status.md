@@ -1,8 +1,21 @@
 # 部署核对记录
 
-最近核对日期：2026-11-06（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
+最近核对日期：2026-11-07（北京时间）。这是人工核对快照，不是自动同步服务。历史基线保留在下方。
 
-## 2026-11-06 卡片管理与插件扩展上线（当前部署）
+## 2026-11-07 资源与导航修复上线（当前部署）
+
+- [PR #14](https://github.com/Leexxin/sma-center/pull/14) 已合并。生产业务提交 `2cc8f030abc719a72cf27dfe58dd5168c98d19bb`，运行镜像 `sha256:b3a14809f09b0af6e632fc52fdcad5077d31d3b8cbe83bae72ee0410746a3dee`，另标记 `sma-center:2cc8f030abc7`。北京时间约 10:40 完成容器切换，running/healthy，入口仍为 `http://192.168.33.124:8080`。
+- 业务应用并入资源页，移除独立导航，旧 `/applications` 转至资源页应用类型；修正筛选布局、事件查询参数切换，并为异常状态提供采集器/错误码详情。没有数据库迁移、认证重置或 Agent 变更。
+- 归档 SHA-256 `86d19d044b13c98e1a8eabd938eaceb189c6b20727013f9950e1ce1b66f302f2`。223 个跟踪文件在服务器及运行容器内逐项 SHA-256 核对一致。本条部署记录为随后单独文档提交，容器内文档保持业务镜像构建快照。
+- 整卷备份 `/root/sma-center-backups/sma-center-20261107-023739.tar.gz`，SHA-256 `c6852a691bfb91fe3bd26c997038036c2439bcbafda2364e9abb4564337c08b9`；源码快照 `/root/sma-center-backups/source-20261107T023739Z.tar.gz`，SHA-256 `52ac3961833a048d83aa6199e3557cd1ecc5d01d06226b908c5f9708d3629cea`。两份归档均已检查可读，文件名采用服务器 UTC。旧镜像保留为 `sma-center:rollback-20261107T023739Z`；未演练回滚或恢复。
+- 保留原 `sma-center-data` 外部卷、端口、网络和自动合并的 `compose.override.yaml`。有效 Compose 配置摘要、现场 override 摘要与升级前一致；历史源码目录保留，未清卷或删除用户配置。
+- 以切换前即时只读基线核对，resources 12、users 1、user_preferences 1、agent_credentials 8、dashboards 1、card_definitions 0、card_states 1，七张表的全部行摘要一致。主密钥、TOTP 状态、SSO 客户端与签名私钥字节摘要一致，8 条加密 Agent 凭据均可解密。没有导出真实凭据或用户卡片内容。
+- 重启后首轮 CPU 差分暂无基线，随后两轮采样确认 8 台 Agent 均有 90 秒内新样本和有效 CPU；3 台 valid、5 台 partial。5 台异常均为上游 `filesystem:collection_failed`，新样本均已包含异常详情。本次展示已知采集异常，没有将其隐藏或宣称修复上游问题。
+- 生产只读 HTTP 验收：healthz/CSS/登录/图标 200；应用目录、资源、面板、观测、卡片定义及内容 API 未认证/伪造内部身份头均 401；受保护页面跳转登录；外部 Origin 写请求为 403。固定 SSO issuer、S256 及单个仅含公钥的 JWKS 均保持。
+- 使用用户现有 Chrome 登录会话刷新实机核对：登录仍有效、原面板及待办内容保留；资源页显示原 12 条资源与 5 项业务应用，应用筛选有效，独立业务应用菜单已移除，筛选布局无重叠。从资源页点击“事件”正常打开事件窗口，内容为暂无事件；在总览聚焦异常状态可读到 `filesystem · collection_failed`，其余 CPU/内存/系统盘值继续显示。没有输入动态码、修改资源/卡片/设置、创建事件或确认外部业务授权。
+- 合并前本地完整隔离回归 83/83、零跳过，生产构建与 ESLint 通过；本次服务器 Docker 构建通过。仓库没有 GitHub Actions 工作流，未将本地测试称作远端 CI。生产没有进行写入测试、故障注入、物理手机、断网或外部客户端回调验收。
+
+## 2026-11-06 卡片管理与插件扩展上线（历史部署）
 
 - [PR #12](https://github.com/Leexxin/sma-center/pull/12) 已合并；生产业务提交 `f51a5d08cf81aa4ece5d23c8c507648e6b2a1bba`，镜像 `sha256:c1b8e0d5f152cded78784fa18db5a44526cd6259fd8513acc11ba3ee721ece8f`，另标记 `sma-center:f51a5d08cf81`。容器 running/healthy，入口仍为 `http://192.168.33.124:8080`。
 - 修复 HTTP IP 下添加卡片失败、浏览卡片触发布局编辑的问题。生产登录页的只读浏览器探测确认 secureContext=false、randomUUID 不可用、getRandomValues 可用；新客户端 ID 生成不再依赖 randomUUID。普通添加确认直接保存，布局编辑中则加入草稿。
